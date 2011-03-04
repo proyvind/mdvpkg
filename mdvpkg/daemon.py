@@ -23,16 +23,22 @@
 
 
 import dbus
+import dbus.exceptions
+import dbus.mainloop.glib
+import dbus.service
+import gobject
+
 import mdvpkg
+
 
 # setup default dbus mainloop:
 dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
 
-class MDVPKGDaemon:
+class MDVPKGDaemon(dbus.service.Object):
     """
-    Represents the daemon, which provides the dbus interface at the
-    system bus.
+    Represents the daemon, which provides the dbus interface (by
+    default at the system bus).
 
     The daemon is responsible of managing transactions which is the
     base of package managing operations.
@@ -42,26 +48,40 @@ class MDVPKGDaemon:
         if not bus:
             bus = dbus.SystemBus()
         self._bus = bus
+        self._loop = gobject.MainLoop()
+        try:
+            bus_name = dbus.service.BusName(mdvpkg.DBUS_SERVICE,
+                                            self._bus,
+                                            do_not_queue=True)
+        except dbus.exceptions.NameExistsException:
+            print 'Someone is using %s service name...' % urpmd.SERVICE
+            sys.exit(1)
+        dbus.service.Object.__init__(self, bus_name, mdvpkg.DBUS_PATH)
 
+    def run(self):
+        self._loop.run()
 
-    @dbus.service.method(
+    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
+                         in_signature='s',
+                         out_signature='s',
+                         sender_keyword='sender')
+    def GetTask(self, task_name, sender):
+        """ Create a new task and return it's path."""
+        return self._create_task(task_name, sender)
 
-    def start(self):
-        self.interface.start()
-
-    def stop(self):
-        self.interface.stop()
-
-    def get_repo(self):
-        return self.repo
-
-    def list_names(self, filter):
-        pkgs = []
-        for pkg_name in self.repo._list:
-            if pkg_name.find(filter) >= 0:
-                pkgs.append(pkg_name)
-        return pkgs
-
-    def install_pkg(self, pkg_name):
-        print 'trying to install', pkg_name
-        return self.repo.install_pkg(pkg_name);
+    def _create_task(self, name, sender):
+        print 'Creating task: %s, %s' % (name, sender)
+        klass = self._get_task_class(name)
+        task = klass(self._bus, sender)
+        return self.task.path
+        
+    def _get_task_class(self, name):
+        """ Returns the class of a task by it's name. """
+        try:
+            getattr(mdvpkg.tasks, '%sTask' % name)
+            if klass != mdvpkg.tasks.Task \
+                   and issubclass(klass, mdvpkg.tasks.Task):
+                return klass
+        except AttributeError:
+            pass
+        raise mdvpkg.exceptions.UnknownTaskError()

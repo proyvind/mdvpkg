@@ -23,24 +23,37 @@
 ##
 """ Script to run the mdvpkg daemon service. """
 
+
 import sys
 import os
 
-if os.getuid() != 0:
-    print "This daemon must be run as root!"
-    sys.exit(1)
 
 currentdir = os.path.dirname(os.path.abspath(sys.argv[0]))
 basedir = os.path.abspath(os.path.join(currentdir, '..'))
 
 # Add the base directory to sys.path if we are running from package
-# directory (i.e. without installation)
-if os.path.exists(os.path.join(basedir, 'mdvpkgd')):
+# directory (i.e. without installation):
+if os.path.exists(os.path.join(basedir, 'mdvpkg')):
     sys.path.append(basedir)
 
-import mdvpkgd.daemon
-d = mdvpkgd.daemon.MDVPKGDaemon(sys.argv)
-try:
-    d.start()
-except KeyboardInterrupt:
-    d.stop()
+# Parse command line arguments to configure and run mdvpkgd ...
+
+import mdvpkg.daemon
+from optparse import OptionParser
+
+parser = OptionParser()
+parser.add_option('--session',
+                  default=False,
+                  action='store_true',
+                  dest='session',
+                  help="Connect mdvpkgd's DBus service to the session "
+                       "bus (instead of the system bus).")
+opts, args = parser.parse_args()
+
+bus = None
+if opts.session:
+    import dbus
+    bus = dbus.SessionBus()
+
+d = mdvpkg.daemon.MDVPKGDaemon(bus=bus)
+d.run()
