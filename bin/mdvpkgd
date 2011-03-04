@@ -38,7 +38,7 @@ if os.path.exists(os.path.join(basedir, 'mdvpkgd')):
     sys.path.append(basedir)
 
 import mdvpkgd.daemon
-d = mdvpkgd.daemon.PackageDaemon(sys.argv)
+d = mdvpkgd.daemon.MDVPKGDaemon(sys.argv)
 try:
     d.start()
 except KeyboardInterrupt:

@@ -23,3 +23,10 @@
 __author__  = "J. Victor Martins <jvdm@mandriva.com>"
 __state__   = "development"
 __version__ = "0.2"
+
+DBUS_SERVICE = 'org.mandrivalinux.mdvpkg'
+DBUS_INTERFACE = 'org.mandrivalinux.mdvpkg'
+DBUS_PATH = '/'
+
+DBUS_TASK_PATH = '%stask' % DBUS_PATH
+DBUS_TASK_INTERFACE = '%s.task' % DBUS_INTERFACE

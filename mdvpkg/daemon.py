@@ -16,43 +16,35 @@
 ## along with this program; if not, write to the Free Software
 ## Foundation, Inc., or visit: http://www.gnu.org/.
 ##
-## Author(s): J. Victor Martins <jvdm@mandriva.com>
 ##
+## Author(s): J. Victor Martins <jvdm@mandriva.com>
 ##
 """ Main daemon class. """
 
-import mdvpkgd.repo
-import mdvpkgd.interface
+
+import dbus
+import mdvpkg
+
+# setup default dbus mainloop:
+dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
 
-class PackageDaemon:
-    """ Represents the package daemon. """
+class MDVPKGDaemon:
+    """
+    Represents the daemon, which provides the dbus interface at the
+    system bus.
 
-    def __init__(self, argv):
-        # Add default service ...
-        self.interface = mdvpkgd.interface.DBusService(self);
+    The daemon is responsible of managing transactions which is the
+    base of package managing operations.
+    """
 
-        # Initialize repo with all medias ...
-        self.repo = mdvpkgd.repo.Repo()
-        medias = self.repo.find_medias()
-        for media in medias:
-            key, ignore, update = medias[media]
-            if ignore:
-                print 'Media %s ignored' % media
-                continue
-            if not key:
-                print 'Media %s does not has a key!' % media
-            import os
-            if not os.access(self.repo.media_synthesis(media), os.R_OK):
-                print 'Unable to access synthesis of %s, ignoring' % media
-                ignore = True
-                medias[media] = (key, ignore, update)
-                continue
-            self.repo.add_hdlistpkgs(media,
-                                     self.repo.media_synthesis(media),
-                                     '')
-        # Add installed packages to repo:
-        self.repo.add_installed()
+    def __init__(self, bus=None):
+        if not bus:
+            bus = dbus.SystemBus()
+        self._bus = bus
+
+
+    @dbus.service.method(
 
     def start(self):
         self.interface.start()
