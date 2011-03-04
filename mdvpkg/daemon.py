@@ -29,6 +29,7 @@ import dbus.service
 import gobject
 
 import mdvpkg
+import mdvpkg.exceptions
 
 
 # setup default dbus mainloop:
