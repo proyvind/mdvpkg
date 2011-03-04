@@ -25,6 +25,10 @@
 import sys
 import os
 
+if os.getuid() != 0:
+    print "This daemon must be run as root!"
+    sys.exit(1)
+
 currentdir = os.path.dirname(os.path.abspath(sys.argv[0]))
 basedir = os.path.abspath(os.path.join(currentdir, '..'))
 
