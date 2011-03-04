@@ -21,6 +21,7 @@
 ## Author(s): J. Victor Martins <jvdm@mandriva.com>
 ##
 ##
+""" Script to run the mdvpkg daemon service. """
 
 import sys
 import os
