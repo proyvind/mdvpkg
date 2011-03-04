@@ -1,4 +1,4 @@
 [D-BUS Service]
-Name=org.mandrivalinux.PackageDaemon
-Exec=/usr/sbin/pkgd
+Name=org.mandrivalinux.mdvpkg
+Exec=/usr/bin/mdvpkgd
 User=root
