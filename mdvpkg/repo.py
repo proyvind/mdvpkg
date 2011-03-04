@@ -16,11 +16,12 @@
 ## along with this program; if not, write to the Free Software
 ## Foundation, Inc., or visit: http://www.gnu.org/.
 ##
+##
 ## Author(s): Eugeni Dodonov <eugeni@mandriva.com>
 ##            J. Victor Martins <jvdm@mandriva.com>
 ##
-##
 """ URPMI repository manipulation. """
+
 
 import os
 import re
@@ -205,3 +206,28 @@ class Repo:
         """Calls urpmi to uninstall pkg_name and all orphaned deps."""
 
         pkg = self._list[pkg_name]
+
+
+def initialize_repo():
+    # Initialize repo with all medias ...
+    repo = Repo()
+    medias = repo.find_medias()
+    for media in medias:
+        key, ignore, update = medias[media]
+        if ignore:
+            print 'Media %s ignored' % media
+            continue
+        if not key:
+            print 'Media %s does not has a key!' % media
+        import os
+        if not os.access(repo.media_synthesis(media), os.R_OK):
+            print 'Unable to access synthesis of %s, ignoring' % media
+            ignore = True
+            medias[media] = (key, ignore, update)
+            continue
+        repo.add_hdlistpkgs(media,
+                            repo.media_synthesis(media),
+                            '')
+    # Add installed packages to repo:
+    repo.add_installed()
+    return repo
