@@ -30,6 +30,8 @@ import gobject
 
 import mdvpkg
 import mdvpkg.exceptions
+import mdvpkg.tasks
+import mdvpkg.worker
 
 
 # setup default dbus mainloop:
@@ -45,7 +47,7 @@ class MDVPKGDaemon(dbus.service.Object):
     base of package managing operations.
     """
 
-    def __init__(self, bus=None):
+    def __init__(self, bus=None, backend_path='urpmi_backend.pl'):
         if not bus:
             bus = dbus.SystemBus()
         self._bus = bus
@@ -58,6 +60,7 @@ class MDVPKGDaemon(dbus.service.Object):
             print 'Someone is using %s service name...' % urpmd.SERVICE
             sys.exit(1)
         dbus.service.Object.__init__(self, bus_name, mdvpkg.DBUS_PATH)
+        self._worker = mdvpkg.worker.TaskWorker(backend_path)
 
     def run(self):
         self._loop.run()
@@ -71,17 +74,17 @@ class MDVPKGDaemon(dbus.service.Object):
         return self._create_task(task_name, sender)
 
     def _create_task(self, name, sender):
-        print 'Creating task: %s, %s' % (name, sender)
+        print 'Request task: %s, %s' % (name, sender)
         klass = self._get_task_class(name)
-        task = klass(self._bus, sender)
-        return self.task.path
+        task = klass(self._bus, sender, self._worker)
+        return task.path
         
     def _get_task_class(self, name):
         """ Returns the class of a task by it's name. """
         try:
-            getattr(mdvpkg.tasks, '%sTask' % name)
-            if klass != mdvpkg.tasks.Task \
-                   and issubclass(klass, mdvpkg.tasks.Task):
+            klass = getattr(mdvpkg.tasks, '%sTask' % name)
+            if klass != mdvpkg.tasks.TaskBase \
+                   and issubclass(klass, mdvpkg.tasks.TaskBase):
                 return klass
         except AttributeError:
             pass

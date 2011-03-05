@@ -48,6 +48,11 @@ parser.add_option('--session',
                   dest='session',
                   help="Connect mdvpkgd's DBus service to the session "
                        "bus (instead of the system bus).")
+parser.add_option('--backend',
+                  default=False,
+                  action='store',
+                  dest='backend',
+                  help="Path to the urpmi backend to use.")
 opts, args = parser.parse_args()
 
 bus = None
@@ -55,5 +60,5 @@ if opts.session:
     import dbus
     bus = dbus.SessionBus()
 
-d = mdvpkg.daemon.MDVPKGDaemon(bus=bus)
+d = mdvpkg.daemon.MDVPKGDaemon(bus=bus, backend_path=opts.backend)
 d.run()
