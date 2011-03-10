@@ -11,27 +11,21 @@ use urpm::select;
 
 $| = 1;
 
-my %routine = (
-    'do-nothing' => sub { print "\n" },
-    'list-media' => \&list_media
-);
-
 my $urpm = urpm->new_parse_cmdline;
 urpm::media::configure($urpm);
 
 while (<>) {
     chomp($_);
-    $_ or $_ = 'do-nothing';
+    $_ or next;
     my ($cmd, @args) = split /\s+/, $_;
-    exists $routine{$cmd} or die "Unknow command $cmd\n";
-    $routine{$cmd}->(@args);
+    $main::{"on_command__$cmd"}->(@args);
 }
 
 sub to_bool {
     return $_[0] ? 'True' : 'False';
 }
 
-sub list_media {
+sub on_command__list_media {
     foreach (@{$urpm->{media}}) {
 	my ($name, $update, $ignore) 
 	    = ($_->{name}, $_->{update}, $_->{ignore});
