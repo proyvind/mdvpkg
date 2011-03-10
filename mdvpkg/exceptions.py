@@ -26,7 +26,7 @@ import dbus
 
 
 class DaemonError(dbus.DBusException):
-    """ Internal error in urpmd. """
+    """ Internal error in mdvpkg. """
 
     _dbus_error_name = "org.mandrivalinux.mdvpkg"
 
