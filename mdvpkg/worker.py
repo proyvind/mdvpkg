@@ -22,6 +22,7 @@
 """ Task classes and task worker for mdvpkg. """
 
 
+import gobject
 import subprocess
 import threading
 import Queue
