@@ -72,7 +72,7 @@ class ListMediaTask(TaskBase):
 
     def worker_callback(self, backend):
         print 'Running ListMedia task'
-        medias = backend.do('list-media')
+        medias = backend.do('list_media')
         for media in medias:
             self.Media(*media)
         self.Finished()
