@@ -57,7 +57,7 @@ class MDVPKGDaemon(dbus.service.Object):
                                             self._bus,
                                             do_not_queue=True)
         except dbus.exceptions.NameExistsException:
-            print 'Someone is using %s service name...' % urpmd.SERVICE
+            print 'Someone is using %s service name...' % mdvpkg.DBUS_SERVICE
             sys.exit(1)
         dbus.service.Object.__init__(self, bus_name, mdvpkg.DBUS_PATH)
         self._worker = mdvpkg.worker.TaskWorker(backend_path)
