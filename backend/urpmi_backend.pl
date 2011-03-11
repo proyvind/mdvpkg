@@ -20,8 +20,15 @@ while (<>) {
     chomp($_);
     $_ or next;
     my ($cmd, @args) = split /\s+/, $_;
+
+    my %args = ();
+    foreach (@args) {
+        my ($name, $value) = split /=/;
+        $args{$name} = $value;
+    }
+
     # TODO Check if it's defined:
-    $main::{"on_command__$cmd"}->(@args);
+    $main::{"on_command__$cmd"}->(%args);
 }
 
 sub to_bool {
@@ -114,8 +121,9 @@ sub on_command__list_groups {
 }
 
 sub on_command__package_details {
-    my ($name) = @_;
+    my (%args) = @_;
     my $db = open_urpm_db();
+    my $name = $args{name};
 
     foreach my $media (@{$urpm->{media}}) {
         next if $media->{ignore};
