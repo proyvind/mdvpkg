@@ -6,7 +6,7 @@ data_files = [ ('/etc/dbus-1/system.d/',
                 glob('dbus/*.conf')),
                ('/usr/share/dbus-1/system-services/',
                 glob('dbus/*.service')),
-               (mdvpkg.MDVPKG_BACKEND_DIR,
+               (mdvpkg.DEFAULT_BACKEND_DIR,
                 glob('backend/*')),
                ('/usr/sbin/',
                 ['bin/mdvpkgd']) ]
