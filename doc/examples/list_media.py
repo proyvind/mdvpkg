@@ -8,7 +8,7 @@ from dbus.mainloop.glib import DBusGMainLoop
 DBusGMainLoop(set_as_default=True)
 loop = gobject.MainLoop()
 
-bus = dbus.SessionBus()
+bus = dbus.SystemBus()
 proxy = bus.get_object(mdvpkg.DBUS_SERVICE, mdvpkg.DBUS_PATH)
 task_path = proxy.GetTask('ListMedia', dbus_interface=mdvpkg.DBUS_INTERFACE)
 

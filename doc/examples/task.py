@@ -16,7 +16,7 @@ print 'TASK:', task_name, sys.argv[2:]
 DBusGMainLoop(set_as_default=True)
 loop = gobject.MainLoop()
 
-bus = dbus.SessionBus()
+bus = dbus.SystemBus()
 
 def signal_cb(*args, **kwargs):
     signal = kwargs['signal']

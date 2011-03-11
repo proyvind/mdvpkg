@@ -7,5 +7,5 @@ if [ -e $TARBALL.bz2 ]; then
 	exit 1
 fi
 
-git archive --format=tar HEAD > $TARBALL
+git archive --prefix=mdvpkg-$VERSION/ --format=tar HEAD -o $TARBALL
 bzip2 $TARBALL
