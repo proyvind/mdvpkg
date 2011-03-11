@@ -22,12 +22,17 @@
 """ Task classes and task worker for mdvpkg. """
 
 
+import gobject
 import dbus
 import dbus.service
 import dbus.service
 import uuid
 
 import mdvpkg
+
+
+# Delay before removing tasks from the bus:
+TASK_DEL_TIMEOUT = 5
 
 
 class TaskBase(dbus.service.Object):
@@ -53,11 +58,6 @@ class TaskBase(dbus.service.Object):
         self._worker.push(self)
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='sbb')
-    def Media(self, media_name, update, ignore):
-        pass
-
-    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='')
     def Finished(self):
         pass
@@ -66,16 +66,25 @@ class TaskBase(dbus.service.Object):
         """ Called by the worker to perform the task. """
         raise NotImplementedError()
 
+    def exit_callback(self):
+        self.Finished()
+        # mall timeout so the signal can propagate:
+        gobject.timeout_add_seconds(TASK_DEL_TIMEOUT,
+                                    self.remove_from_connection)
 
 class ListMediasTask(TaskBase):
     """ List all available medias. """
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='sbb')
+    def Media(self, media_name, update, ignore):
+        pass
 
     def worker_callback(self, backend):
         print 'Running ListMedias task'
         medias = backend.do('list_medias')
         for media in medias:
             self.Media(*media)
-        self.Finished()
 
 
 class ListGroupsTask(TaskBase):
@@ -90,7 +99,6 @@ class ListGroupsTask(TaskBase):
         groups = backend.do('list_groups')
         for group in groups:
             self.Group(*group)
-        self.Finished()
 
 
 class ListPackagesTask(TaskBase):
@@ -112,7 +120,6 @@ class ListPackagesTask(TaskBase):
         pkgs = backend.do('list_packages')
         for pkg in pkgs:
             self.Package(*pkg)
-        self.Finished()
 
 
 class PackageDetailsTask(TaskBase):
@@ -135,4 +142,4 @@ class PackageDetailsTask(TaskBase):
         results = backend.do('package_details', name=self.name)
         for details in results:
             self.PackageDetails(details)
-        self.Finished()
+

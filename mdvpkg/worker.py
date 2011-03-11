@@ -105,6 +105,7 @@ class TaskWorker(object):
                 if not self._backend.running():
                     self._backend.run()
                 task.worker_callback(self._backend)
+                task.exit_callback()
             except Queue.Empty:
                 if self._backend.running():
                     self._backend.kill()
