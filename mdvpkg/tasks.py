@@ -67,13 +67,12 @@ class TaskBase(dbus.service.Object):
         raise NotImplementedError()
 
 
-class ListMediaTask(TaskBase):
+class ListMediasTask(TaskBase):
     """ List all available medias. """
 
     def worker_callback(self, backend):
-        print 'Running ListMedia task'
+        print 'Running ListMedias task'
         medias = backend.do('list_media')
         for media in medias:
             self.Media(*media)
         self.Finished()
-    
