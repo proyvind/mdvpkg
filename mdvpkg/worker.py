@@ -57,14 +57,17 @@ class Backend(object):
             return self.urpm.poll() == None
         return False
     
-    def do(self, cmd):
+    def do(self, cmd, **kwargs):
         """
         Send a command to the backend and return a list of results.
 
         Results are python objects, which were created from eval()'d
         string returned by the backend.
         """
-        self.urpm.stdin.write("%s\n" % cmd)
+        kwargs_line = ' '.join([ '='.join([ str(e) for e in pair ])
+                                 for pair in kwargs.items() ])
+
+        self.urpm.stdin.write("%s %s\n" % (cmd, kwargs_line))
         results = []
         while True:
             l = self.urpm.stdout.readline().strip()

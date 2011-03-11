@@ -91,3 +91,48 @@ class ListGroupsTask(TaskBase):
         for group in groups:
             self.Group(*group)
         self.Finished()
+
+
+class ListPackagesTask(TaskBase):
+    """ List all available packages. """
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='ssssssb')
+    def Package(self,
+                name,
+                version,
+                release,
+                disttag,
+                distepoch,
+                arch,
+                installed):
+        pass
+
+    def worker_callback(self, backend):
+        pkgs = backend.do('list_packages')
+        for pkg in pkgs:
+            self.Package(*pkg)
+        self.Finished()
+
+
+class PackageDetailsTask(TaskBase):
+    """ Query for details of a package. """
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='a{ss}')
+    def PackageDetails(self, details_dict):
+        pass
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='s',
+                         out_signature='',
+                         sender_keyword='sender')
+    def SetName(self, name, sender):
+        """ Set the package name to get details from. """
+        self.name = name
+
+    def worker_callback(self, backend):
+        results = backend.do('package_details', name=self.name)
+        for details in results:
+            self.PackageDetails(details)
+        self.Finished()
