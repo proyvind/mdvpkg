@@ -30,3 +30,7 @@ DBUS_PATH = '/'
 
 DBUS_TASK_PATH = '%stask' % DBUS_PATH
 DBUS_TASK_INTERFACE = '%s.task' % DBUS_INTERFACE
+
+DEFAULT_DATA_DIR = '/usr/share/mdvpkg'
+DEFAULT_BACKEND_DIR = '%s/backend' % DEFAULT_DATA_DIR
+DEFAULT_BACKEND_PATH = '%s/urpmi_backend.pl' % DEFAULT_BACKEND_DIR

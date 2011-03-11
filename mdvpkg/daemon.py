@@ -47,10 +47,12 @@ class MDVPKGDaemon(dbus.service.Object):
     base of package managing operations.
     """
 
-    def __init__(self, bus=None, backend_path='urpmi_backend.pl'):
+    def __init__(self, bus=None, backend_path=None):
         if not bus:
             bus = dbus.SystemBus()
         self._bus = bus
+        if not backend_path:
+            backend_path = mdvpkg.DEFAULT_BACKEND_PATH
         self._loop = gobject.MainLoop()
         try:
             bus_name = dbus.service.BusName(mdvpkg.DBUS_SERVICE,
