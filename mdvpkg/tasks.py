@@ -72,7 +72,22 @@ class ListMediasTask(TaskBase):
 
     def worker_callback(self, backend):
         print 'Running ListMedias task'
-        medias = backend.do('list_media')
+        medias = backend.do('list_medias')
         for media in medias:
             self.Media(*media)
+        self.Finished()
+
+
+class ListGroupsTask(TaskBase):
+    """ List all available groups. """
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='si')
+    def Group(self, group, pkg_count):
+        pass
+
+    def worker_callback(self, backend):
+        groups = backend.do('list_groups')
+        for group in groups:
+            self.Group(*group)
         self.Finished()
