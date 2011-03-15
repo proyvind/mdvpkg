@@ -68,26 +68,48 @@ class MDVPKGDaemon(dbus.service.Object):
         self._loop.run()
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
+                         in_signature='',
+                         out_signature='s',
+                         sender_keyword='sender')
+    def ListMedias(self, sender):
+        return self._create_task(mdvpkg.tasks.ListMediasTask,
+                                 sender)
+        
+    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
+                         in_signature='',
+                         out_signature='s',
+                         sender_keyword='sender')
+    def ListGroups(self, sender):
+        return self._create_task(mdvpkg.tasks.ListGroupsTask,
+                                 sender)
+
+    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
+                         in_signature='',
+                         out_signature='s',
+                         sender_keyword='sender')
+    def ListPackages(self, sender):
+        return self._create_task(mdvpkg.tasks.ListPackagesTask,
+                                 sender)
+
+    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='s',
                          out_signature='s',
                          sender_keyword='sender')
-    def GetTask(self, task_name, sender):
-        """ Create a new task and return it's path."""
-        return self._create_task(task_name, sender)
+    def PackageDetails(self, name, sender):
+        return self._create_task(mdvpkg.tasks.PackageDetailsTask,
+                                 sender,
+                                 name)
 
-    def _create_task(self, name, sender):
-        print 'Request task: %s, %s' % (name, sender)
-        klass = self._get_task_class(name)
-        task = klass(self._bus, sender, self._worker)
+    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
+                         in_signature='as',
+                         out_signature='s',
+                         sender_keyword='sender')
+    def SearchFiles(self, files, sender):
+        return self._create_task(mdvpkg.tasks.SearchFilesTask,
+                                 sender,
+                                 files)
+
+    def _create_task(self, task_class, sender, *args):
+        print 'Request task: %s, %s' % (task_class.__name__, sender)
+        task = task_class(self._bus, sender, self._worker, *args)
         return task.path
-        
-    def _get_task_class(self, name):
-        """ Returns the class of a task by it's name. """
-        try:
-            klass = getattr(mdvpkg.tasks, '%sTask' % name)
-            if klass != mdvpkg.tasks.TaskBase \
-                   and issubclass(klass, mdvpkg.tasks.TaskBase):
-                return klass
-        except AttributeError:
-            pass
-        raise mdvpkg.exceptions.UnknownTaskError()

@@ -125,21 +125,16 @@ class ListPackagesTask(TaskBase):
 class PackageDetailsTask(TaskBase):
     """ Query for details of a package. """
 
+    def __init__(self, bus, sender, worker, name):
+        TaskBase.__init__(self, bus, sender, worker)
+        self.name = name
+
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='a{ss}')
     def PackageDetails(self, details_dict):
         pass
 
-    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
-                         in_signature='s',
-                         out_signature='',
-                         sender_keyword='sender')
-    def SetName(self, name, sender):
-        """ Set the package name to get details from. """
-        self.name = name
-
     def worker_callback(self, backend):
         results = backend.do('package_details', name=self.name)
         for details in results:
             self.PackageDetails(details)
-

@@ -30,15 +30,10 @@ bus.add_signal_receiver(signal_cb, dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                         member_keyword='signal')
 
 proxy = bus.get_object(mdvpkg.DBUS_SERVICE, mdvpkg.DBUS_PATH)
-task_path = proxy.GetTask(task_name, dbus_interface=mdvpkg.DBUS_INTERFACE)
+task_path = getattr(proxy, task_name)(dbus_interface=mdvpkg.DBUS_INTERFACE,
+                                      *sys.argv[2:])
 
-proxy = bus.get_object(mdvpkg.DBUS_SERVICE, task_path)
-iface = dbus.Interface(proxy, dbus_interface=mdvpkg.DBUS_TASK_INTERFACE)
+task_proxy = bus.get_object(mdvpkg.DBUS_SERVICE, task_path)
+task_proxy.Run(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE)
 
-for cmd in sys.argv[2:]:
-    (name, args) = cmd.split('=')
-    method = getattr(iface, name)
-    method(*args.split(','))
-
-iface.Run()
 loop.run()

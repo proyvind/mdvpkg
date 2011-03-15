@@ -10,7 +10,7 @@ loop = gobject.MainLoop()
 
 bus = dbus.SystemBus()
 proxy = bus.get_object(mdvpkg.DBUS_SERVICE, mdvpkg.DBUS_PATH)
-task_path = proxy.GetTask('ListMedia', dbus_interface=mdvpkg.DBUS_INTERFACE)
+task_path = proxy.ListMedias(dbus_interface=mdvpkg.DBUS_INTERFACE)
 
 def media_cb(*args):
     print 'media %s (update=%s, ignore=%s)' % args
