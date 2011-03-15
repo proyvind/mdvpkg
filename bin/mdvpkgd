@@ -36,6 +36,9 @@ basedir = os.path.abspath(os.path.join(currentdir, '..'))
 if os.path.exists(os.path.join(basedir, 'mdvpkg')):
     sys.path.append(basedir)
 
+# Add paulob's python directory
+sys.path.append('/usr/share/mandriva')
+
 # Parse command line arguments to configure and run mdvpkgd ...
 
 import mdvpkg.daemon
