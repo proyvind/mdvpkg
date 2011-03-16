@@ -138,3 +138,34 @@ class PackageDetailsTask(TaskBase):
         results = backend.do('package_details', name=self.name)
         for details in results:
             self.PackageDetails(details)
+
+class SearchFilesTask(TaskBase):
+    """ Query for package owning file paths. """
+
+    def __init__(self, bus, sender, worker, patterns):
+        TaskBase.__init__(self, bus, sender, worker)
+        self.patterns = patterns
+        self.regex = False
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='ssssas')
+    def PackageFiles(self, name, version, release, arch, files):
+        pass
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='b',
+                         out_signature='',
+                         sender_keyword='sender')
+    def SetRegex(self, regex, sender):
+        """ Match file names using a regex. """
+        self.regex = regex
+
+    def worker_callback(self, backend):
+        for pattern in self.patterns:
+            opts = {'pattern': pattern}
+            if self.regex:
+                opts['fuzzy'] = self.regex
+            results = backend.do('search_files', **opts)
+            for r in results:
+                self.PackageFiles(r['name'], r['version'], r['release'],
+                                      r['arch'], r['files'])
