@@ -12,7 +12,6 @@ except IndexError:
     print 'Missing task name.'
     sys.exit(1)
 
-print 'TASK:', task_name, sys.argv[2:]
 DBusGMainLoop(set_as_default=True)
 loop = gobject.MainLoop()
 
@@ -30,8 +29,14 @@ bus.add_signal_receiver(signal_cb, dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                         member_keyword='signal')
 
 proxy = bus.get_object(mdvpkg.DBUS_SERVICE, mdvpkg.DBUS_PATH)
+
+task_args = []
+for a in sys.argv[2:]:
+    task_args.append(eval(a))
+print 'TASK:', task_name, task_args
+
 task_path = getattr(proxy, task_name)(dbus_interface=mdvpkg.DBUS_INTERFACE,
-                                      *sys.argv[2:])
+                                      *task_args)
 
 task_proxy = bus.get_object(mdvpkg.DBUS_SERVICE, task_path)
 task_proxy.Run(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE)
