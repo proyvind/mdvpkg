@@ -1,5 +1,37 @@
 #!/usr/bin/perl
 
+##
+## Copyright (C) 2010-2011 Mandriva S.A <http://www.mandriva.com>
+## All rights reserved
+##
+## This program is free software; you can redistribute it and/or modify
+## it under the terms of the GNU General Public License as published by
+## the Free Software Foundation; either version 2 of the License, or
+## (at your option) any later version.
+##
+## This program is distributed in the hope that it will be useful,
+## but WITHOUT ANY WARRANTY; without even the implied warranty of
+## MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+## GNU Lesser General Public License for more details.
+##
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, write to the Free Software
+## Foundation, Inc., or visit: http://www.gnu.org/.
+##
+##
+## Author(s): J. Victor Martins <jvdm@mandriva.com>
+##
+
+
+## TODO ##
+#
+# 1. Use asynchronous responses (requires a better ipc protocol),
+#    allowing caller to use co-routines.
+#
+# 2. Include error handling in ipc protocol.
+#
+
+
 use warnings;
 use strict;
 
@@ -148,6 +180,61 @@ sub on_command__package_details {
                        $installtime);
             }
         }
+    }
+
+    print "\n";
+}
+
+sub on_command__search_files {
+    my (%args) = @_;
+    
+    # For each medium, we browse the xml info file, while looking for
+    # files which matched with the search term given in argument. We
+    # store results in a hash ...
+
+    my %results;
+
+    foreach my $medium (urpm::media::non_ignored_media($urpm)) {
+	my $xml_info_file = urpm::media::any_xml_info($urpm,
+						      $medium,
+						      qw( files summary ),
+						      undef,
+						      undef);
+	$xml_info_file or next;
+
+	require urpm::xml_info;
+	require urpm::xml_info_pkg;
+
+	my $F = urpm::xml_info::open_lzma($xml_info_file);
+	my $fn;
+	local $_;
+	my @files = ();
+	while (<$F>) {
+	    chomp;
+	    if (/<files/) {
+		($fn) = /fn="(.*)"/;
+	    } 
+	    elsif (/^$args{pattern}$/ or ($args{fuzzy} and /$args{pattern}/)) {
+		my $xml_pkg = urpm::xml_info_pkg->new({ fn => $fn });
+		if (not exists $results{$fn}) {
+		    $results{$fn} = { pkg => $xml_pkg,
+				      files => [] };
+		}
+		push @{ $results{$fn}{files} }, $_;
+	    }
+	}
+    }
+
+    foreach my $fn (keys %results) {
+	my $xml_pkg = $results{$fn}{pkg};
+	printf("{'name': '%s', 'version': '%s', 'release': '%s', " 
+	       . "'arch': '%s', 'files': [",
+	       $xml_pkg->name,
+	       $xml_pkg->version,
+	       $xml_pkg->release,
+	       $xml_pkg->arch);
+	printf("'%s', ", $_) for (@{ $results{$fn}{files} });
+	print "]}\n";
     }
 
     print "\n";
