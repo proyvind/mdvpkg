@@ -126,20 +126,72 @@ sub open_urpm_db {
 #
 # $urpm		urpm object
 # $db		URPM::DB object
-# $callback	$callback->($pkg, $installed) for each package
+# $callback	$callback->($pkg) for each package
+#
+# Packages passed to callback have flag_installed and flag_upgrade
+# correctly set.
 #
 sub traverse_packages {
     my ($urpm, $db, $callback) = @_;
 
-    # Traverse installed packages ...
-    $db->traverse(sub { $callback->($_[0], 1) });
+    my %installed = ();
 
     # Traverse installable packages ...
     foreach my $pkg (@{$urpm->{depslist}}) {
         if ($pkg->flag_upgrade) {
-	    $callback->($pkg, 0);
+	    $callback->($pkg);
+	}
+	if ($pkg->flag_installed) {
+	    $installed{$pkg->fullname} = $pkg;
 	}
     }
+
+    # Traverse installed packages ...
+    $db->traverse(
+	sub {
+	    my ($pkg) = @_;
+	    if (exists $installed{$pkg->fullname}) {
+		$pkg = $installed{$pkg->fullname};
+	    }
+	    else {
+		$pkg->set_flag_installed(1);
+	    }	    
+	    $callback->($pkg);
+	}
+	);
+}
+
+sub get_media_name {
+    my ($urpm, $pkg) = @_;
+    if ($pkg->id) {
+	my $media = URPM::pkg2media($urpm->{media}, $pkg);
+	return $media->{name};
+    }
+    return '';  # represents locally installed packages
+}
+
+sub is_installed {
+    return $_[0]->flag_installed and not $_[0]->flag_upgrade;
+}
+
+sub filter_package {
+    my ($pkg, %filters) = @_;
+
+    %filters or return 1;
+
+    foreach (keys %filters) {
+	my $filter = $filters{$_};
+	if (/media/) {
+	    get_media_name($urpm, $pkg) !~ /$filter/ and return 0;
+	}
+	else {
+	    # Any other filter is matched to URPM::Package
+	    # properties:
+	    $pkg->$_ !~ /$filter/ and return 0;
+	}
+    }
+
+    return 1;
 }
 
 #
@@ -159,15 +211,23 @@ sub on_command__list_medias {
 }
 
 sub on_command__list_packages {
+    my (%args) = @_;
     my $db = open_urpm_db();
 
     traverse_packages(
 	$urpm,
 	$db,
 	sub {
-	    print py_package_str($_[0], 
-				 [ qw(name version release arch summary) ],
-				 bool => { installed => $_[1] });
+	    my ($pkg) = @_;
+	    filter_package($pkg, %args) or return;
+	    print py_package_str(
+		$pkg,
+		[ qw(name version release arch summary) ],
+		bool => { 
+		    installed => $pkg->flag_installed,
+		    update => $pkg->flag_upgrade,
+		}
+		);
 	}
 	);
 
