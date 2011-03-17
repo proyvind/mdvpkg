@@ -63,17 +63,49 @@ while (<>) {
     $main::{"on_command__$cmd"}->(%args);
 }
 
-sub to_bool {
+sub py_bool_str {
     return $_[0] ? 'True' : 'False';
 }
 
+# py_package_str - returns python string for package data
+#
+# $pkg		urpm package object
+# $tags_ref	array ref to list of package tags to add
+# %extra	hash of extra data, keyed by type:
+#               ( bool => { name => val }, str => { name => val} )
+#
+# if not @tags use qw(name version release arch) by default.
+#
 sub py_package_str {
-    my ($pkg, $installed) = @_;
-    my $py_str = '(';
-    foreach my $part ($pkg->fullname()) { 
-	$py_str .= "'$part',";
+    my ($pkg, $tags_ref, %extra) = @_;
+    if (not $tags_ref) {
+	$tags_ref = [ qw(name version release arch) ];
     }
-    $py_str .= to_bool($installed) . ")\n";
+
+    my $py_str = "{";
+
+    for my $tag (@$tags_ref) {
+	$py_str .= sprintf("'%s':'%s',", $tag, $pkg->$tag);
+    }
+
+    # Each key provide a helper to produce python string according to
+    # $type:
+    my %helper = (
+	bool => \&py_bool_str,
+	str => sub { sprintf("'%s'", $_[0]) },
+	int => sub { sprintf("%d", $_[0]) },
+	float => sub { sprintf("%f", $_[0]) },
+	);
+	  
+    foreach my $type (keys %extra) {
+	while ( my ($name, $value) = each %{ $extra{$type} } ) {
+	    $py_str .= sprintf("'%s':%s,", 
+			       $name,
+			       $helper{$type}->($value));
+	}
+    }
+
+    $py_str .= "}\n";
     return $py_str;
 }
 
@@ -115,7 +147,10 @@ sub on_command__list_medias {
     foreach (@{$urpm->{media}}) {
 	my ($name, $update, $ignore) 
 	    = ($_->{name}, $_->{update}, $_->{ignore});
-	printf("('%s', %s, %s)\n", $name, to_bool($update), to_bool($ignore))
+	printf("('%s', %s, %s)\n", 
+	       $name, 
+	       py_bool_str($update), 
+	       py_bool_str($ignore))
     }
     print "\n";
 }
@@ -123,9 +158,16 @@ sub on_command__list_medias {
 sub on_command__list_packages {
     my $db = open_urpm_db();
 
-    traverse_packages($urpm, $db, sub {
-	                              print py_package_str(@_)
-		                  });
+    traverse_packages(
+	$urpm,
+	$db,
+	sub {
+	    print py_package_str($_[0], 
+				 undef, 
+				 bool => { installed => $_[1] });
+	}
+	);
+
     print "\n";
 }
 
@@ -169,15 +211,13 @@ sub on_command__package_details {
                 if ($pkg->flag_installed) {
                     $installtime = `rpm -q $name --qf '%{installtime}'`
                 }
-                printf("{'name': '%s', 'version': '%s', 'group': '%s', "
-                           . "'summary': '%s', 'media': '%s', "
-                           . "'installtime': '%s'}\n",
-                       $pkg->name,
-                       $pkg->version,
-                       $pkg->group, 
-                       $pkg->summary, 
-                       $media_name,
-                       $installtime);
+		print py_package_str(
+		    $pkg, 					 
+		    [ qw(name version release arch group summary) ],
+		    bool => { installed => $pkg->flag_installed },
+		    str => { media => $media_name },
+		    int => { installtime => $installtime }
+		    );
             }
         }
     }
