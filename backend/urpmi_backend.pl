@@ -67,6 +67,11 @@ sub py_bool_str {
     return $_[0] ? 'True' : 'False';
 }
 
+sub py_str {
+    $_[0] =~ s|'|\\'|g;
+    return "'" . $_[0] . "'";
+}    
+
 # py_package_str - returns python string for package data
 #
 # $pkg		urpm package object
@@ -83,14 +88,14 @@ sub py_package_str {
     my $py_str = "{";
 
     for my $tag (@$tags_ref) {
-	$py_str .= sprintf("'%s':'%s',", $tag, $pkg->$tag);
+	$py_str .= sprintf("'%s':'%s',", $tag, py_str($pkg->$tag));
     }
 
     # Each key provide a helper to produce python string according to
     # $type:
     my %helper = (
 	bool => \&py_bool_str,
-	str => sub { sprintf("'%s'", $_[0]) },
+	str => \&py_str,
 	int => sub { sprintf("%d", $_[0]) },
 	float => sub { sprintf("%f", $_[0]) },
 	);
@@ -211,9 +216,10 @@ sub on_command__package_details {
                 }
 		print py_package_str(
 		    $pkg, 					 
-		    [ qw(name version release arch group size) ],
+		    [ qw(name version release arch group) ],
 		    str => { media => $media_name },
-		    int => { installtime => $installtime },
+		    int => { installtime => $installtime,
+		             size => $pkg->size() },
 		    );
             }
         }
