@@ -88,7 +88,7 @@ sub py_package_str {
     my $py_str = "{";
 
     for my $tag (@$tags_ref) {
-	$py_str .= sprintf("'%s':'%s',", $tag, py_str($pkg->$tag));
+	$py_str .= sprintf("'%s':%s,", $tag, py_str($pkg->$tag));
     }
 
     # Each key provide a helper to produce python string according to
