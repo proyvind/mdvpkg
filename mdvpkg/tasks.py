@@ -105,21 +105,16 @@ class ListPackagesTask(TaskBase):
     """ List all available packages. """
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='ssssssb')
-    def Package(self,
-                name,
-                version,
-                release,
-                disttag,
-                distepoch,
-                arch,
-                installed):
+                         signature='a{ss}bs')
+    def Package(self, package_name, installed, summary):
         pass
 
     def worker_callback(self, backend):
-        pkgs = backend.do('list_packages')
-        for pkg in pkgs:
-            self.Package(*pkg)
+        results = backend.do('list_packages')
+        for result in results:
+            installed = result.pop('installed')
+            summary = result.pop('summary')
+            self.Package(result, installed, summary)
 
 
 class PackageDetailsTask(TaskBase):
@@ -130,14 +125,23 @@ class PackageDetailsTask(TaskBase):
         self.name = name
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='a{ss}')
-    def PackageDetails(self, details_dict):
+                         signature='a{ss}sstt')
+    def PackageDetails(self, name, group, media, size, installtime):
         pass
 
     def worker_callback(self, backend):
         results = backend.do('package_details', name=self.name)
-        for details in results:
-            self.PackageDetails(details)
+        for result in results:
+            group = result.pop('group')
+            size = result.pop('size')
+            installtime = result.pop('installtime')
+            media = result.pop('media')
+            self.PackageDetails(result,
+                                group,
+                                media,
+                                size,
+                                installtime)
+
 
 class SearchFilesTask(TaskBase):
     """ Query for package owning file paths. """
