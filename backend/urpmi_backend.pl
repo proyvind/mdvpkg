@@ -78,10 +78,8 @@ sub py_bool_str {
 #
 sub py_package_str {
     my ($pkg, $tags_ref, %extra) = @_;
-    if (not $tags_ref) {
-	$tags_ref = [ qw(name version release arch) ];
-    }
 
+    # This will hold the final python string:
     my $py_str = "{";
 
     for my $tag (@$tags_ref) {
@@ -163,7 +161,7 @@ sub on_command__list_packages {
 	$db,
 	sub {
 	    print py_package_str($_[0], 
-				 undef, 
+				 [ qw(name version release arch summary) ],
 				 bool => { installed => $_[1] });
 	}
 	);
@@ -207,16 +205,15 @@ sub on_command__package_details {
 
         foreach my $pkg (@{$urpm->{depslist}}[$start..$end]) {
             if ($pkg->name eq $name) {
-                my $installtime = '';
+                my $installtime = 0;
                 if ($pkg->flag_installed) {
                     $installtime = `rpm -q $name --qf '%{installtime}'`
                 }
 		print py_package_str(
 		    $pkg, 					 
-		    [ qw(name version release arch group summary) ],
-		    bool => { installed => $pkg->flag_installed },
+		    [ qw(name version release arch group size) ],
 		    str => { media => $media_name },
-		    int => { installtime => $installtime }
+		    int => { installtime => $installtime },
 		    );
             }
         }
