@@ -22,6 +22,7 @@
 """ Task classes and task worker for mdvpkg. """
 
 
+import re
 import gobject
 import dbus
 import dbus.service
@@ -115,13 +116,52 @@ class ListGroupsTask(TaskBase):
 class ListPackagesTask(TaskBase):
     """ List all available packages. """
 
+    def __init__(self, bus, sender, worker):
+        TaskBase.__init__(self, bus, sender, worker)
+        self.args = []
+        self.kwargs = {}
+
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='a{ss}ss')
     def Package(self, name, summary, status):
         pass
 
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='s',
+                         out_signature='',
+                         sender_keyword='sender')
+    def FilterName(self, name, sender):
+        self.kwargs['name'] = name
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='s',
+                         out_signature='',
+                         sender_keyword='sender')
+    def FilterMedia(self, media, sender):
+         self.kwargs['media'] = media
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='s',
+                         out_signature='',
+                         sender_keyword='sender')
+    def FilterGroup(self, group, sender):
+        self.kwargs['group'] = group
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='s',
+                         out_signature='',
+                         sender_keyword='sender')
+    def FilterStatus(self, filter, sender):
+        if not re.match('~?(new|upgrade|local)', filter):
+            self.Error('Unknow status filter: %s' % filter)
+            self.exit_callback()
+        else:
+            self.args.append(filter)
+
     def worker_callback(self, backend):
-        (success, result) = backend.do('list_packages')
+        (success, result) = backend.do('list_packages',
+                                       *self.args,
+                                       **self.kwargs)
         if success:
             for pkg in result:
                 summary = pkg.pop('summary')
