@@ -121,7 +121,7 @@ sub py_package_str {
     my %helper = (
 	bool => \&py_bool_str,
 	str => \&py_str,
-	int => sub { sprintf("%d", $_[0]) },
+	int => sub { sprintf("%d", $_[0] || 0) },
 	float => sub { sprintf("%f", $_[0]) },
 	);
 	  
@@ -294,12 +294,6 @@ sub on_command__list_packages {
 	    my ($pkg) = @_;
 	    filter_package($pkg, %args) or return;
 
-	    my $installtime = 0;
-	    if ($pkg->flag_installed) {
-		my $name = $pkg->name;
-		$installtime = `rpm -q $name --qf '%{installtime}'`;
-	    }
-
 	    print py_package_str(
 		$pkg,
 		[ qw(name version release arch epoch group summary) ],
@@ -308,7 +302,6 @@ sub on_command__list_packages {
 		},
 		int => {
 		    size => $pkg->size,
-		    installtime => $installtime,
 		}
 		);
 	}
@@ -352,10 +345,18 @@ sub on_command__package_details {
 	sub {
 	    my ($pkg) = @_;
             if ($pkg->name eq $name) {
+
+		my $installtime = 0;
+		if ($pkg->flag_installed) {
+		    my $name = $pkg->name;
+		    $installtime = `rpm -q $name --qf '%{installtime}'`;
+		}
+
 		print py_package_str(
 		    $pkg, 					 
 		    [ qw(name version release arch epoch) ],
 		    str => { media => get_media_name($urpm, $pkg) },
+		    int => { installtime => $installtime },
 		    );
             }
 	}
