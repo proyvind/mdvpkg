@@ -293,11 +293,22 @@ sub on_command__list_packages {
 	sub {
 	    my ($pkg) = @_;
 	    filter_package($pkg, %args) or return;
+
+	    my $installtime = 0;
+	    if ($pkg->flag_installed) {
+		my $name = $pkg->name;
+		$installtime = `rpm -q $name --qf '%{installtime}'`;
+	    }
+
 	    print py_package_str(
 		$pkg,
-		[ qw(name version release arch summary) ],
+		[ qw(name version release arch epoch group summary) ],
 		str => { 
 		    status => get_status($pkg)
+		},
+		int => {
+		    size => $pkg->size,
+		    installtime => $installtime,
 		}
 		);
 	}
@@ -332,22 +343,19 @@ sub on_command__package_details {
     my $name = $args{name} 
         or die "Missing required parameter: name\n";
 
+    # TODO Download and parse hdlist to provide extra information for
+    #      non-installed packages.
+
     traverse_packages(
 	$urpm,
 	$db,
 	sub {
 	    my ($pkg) = @_;
             if ($pkg->name eq $name) {
-                my $installtime = 0;
-                if ($pkg->flag_installed) {
-                    $installtime = `rpm -q $name --qf '%{installtime}'`
-                }
 		print py_package_str(
 		    $pkg, 					 
-		    [ qw(name version release arch group) ],
+		    [ qw(name version release arch epoch) ],
 		    str => { media => get_media_name($urpm, $pkg) },
-		    int => { installtime => $installtime,
-		             size => $pkg->size() },
 		    );
             }
 	}
