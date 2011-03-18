@@ -62,6 +62,11 @@ class TaskBase(dbus.service.Object):
     def Finished(self):
         pass
 
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='s')
+    def Error(self, msg):
+        pass
+
     def worker_callback(self, backend):
         """ Called by the worker to perform the task. """
         raise NotImplementedError()
@@ -72,6 +77,7 @@ class TaskBase(dbus.service.Object):
         gobject.timeout_add_seconds(TASK_DEL_TIMEOUT,
                                     self.remove_from_connection)
 
+
 class ListMediasTask(TaskBase):
     """ List all available medias. """
 
@@ -81,10 +87,12 @@ class ListMediasTask(TaskBase):
         pass
 
     def worker_callback(self, backend):
-        print 'Running ListMedias task'
-        medias = backend.do('list_medias')
-        for media in medias:
-            self.Media(*media)
+        (success, result) = backend.do('list_medias')
+        if success:
+            for media in result:
+                self.Media(*media)
+        else:
+            self.Error(result)
 
 
 class ListGroupsTask(TaskBase):
@@ -96,26 +104,31 @@ class ListGroupsTask(TaskBase):
         pass
 
     def worker_callback(self, backend):
-        groups = backend.do('list_groups')
-        for group in groups:
-            self.Group(*group)
+        (success, result) = backend.do('list_groups')
+        if success:
+            for group in result:
+                self.Group(*group)
+        else:
+            self.Error(result)
 
 
 class ListPackagesTask(TaskBase):
     """ List all available packages. """
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='a{ss}bbs')
-    def Package(self, package_name, installed, update, summary):
+                         signature='a{ss}ss')
+    def Package(self, name, summary, status):
         pass
 
     def worker_callback(self, backend):
-        results = backend.do('list_packages')
-        for result in results:
-            installed = result.pop('installed')
-            summary = result.pop('summary')
-            update = result.pop('update')
-            self.Package(result, installed, update, summary)
+        (success, result) = backend.do('list_packages')
+        if success:
+            for pkg in result:
+                summary = pkg.pop('summary')
+                status = pkg.pop('status')
+                self.Package(pkg, summary, status)
+        else:
+            self.Error(result)
 
 
 class PackageDetailsTask(TaskBase):
@@ -131,26 +144,30 @@ class PackageDetailsTask(TaskBase):
         pass
 
     def worker_callback(self, backend):
-        results = backend.do('package_details', name=self.name)
-        for result in results:
-            group = result.pop('group')
-            size = result.pop('size')
-            installtime = result.pop('installtime')
-            media = result.pop('media')
-            self.PackageDetails(result,
-                                group,
-                                media,
-                                size,
-                                installtime)
+        (success, result) = backend.do('package_details',
+                                       name=self.name)
+        if success:
+            for pkg in result:
+                group = pkg.pop('group')
+                size = pkg.pop('size')
+                installtime = pkg.pop('installtime')
+                media = pkg.pop('media')
+                self.PackageDetails(pkg,
+                                    group,
+                                    media,
+                                    size,
+                                    installtime)
+        else:
+            self.Error(result)
 
 
 class SearchFilesTask(TaskBase):
     """ Query for package owning file paths. """
 
-    def __init__(self, bus, sender, worker, patterns):
+    def __init__(self, bus, sender, worker, pattern):
         TaskBase.__init__(self, bus, sender, worker)
-        self.patterns = patterns
-        self.regex = False
+        self.args = []
+        self.kwargs = {'pattern': pattern}
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='ssssas')
@@ -163,14 +180,16 @@ class SearchFilesTask(TaskBase):
                          sender_keyword='sender')
     def SetRegex(self, regex, sender):
         """ Match file names using a regex. """
-        self.regex = regex
+        self.args.append('fuzzy')
 
     def worker_callback(self, backend):
-        for pattern in self.patterns:
-            opts = {'pattern': pattern}
-            if self.regex:
-                opts['fuzzy'] = self.regex
-            results = backend.do('search_files', **opts)
-            for r in results:
+        (success, result) = backend.do('search_files',
+                                       *self.args,
+                                       **self.kwargs)
+        if success:
+            for r in result:
                 self.PackageFiles(r['name'], r['version'], r['release'],
-                                      r['arch'], r['files'])
+                                  r['arch'], r['files'])
+        else:
+            self.Error(result)
+

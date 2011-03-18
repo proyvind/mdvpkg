@@ -57,24 +57,34 @@ class Backend(object):
             return self.urpm.poll() == None
         return False
     
-    def do(self, cmd, **kwargs):
+    def do(self, cmd, *args, **kwargs):
         """
         Send a command to the backend and return a list of results.
 
         Results are python objects, which were created from eval()'d
         string returned by the backend.
         """
-        kwargs_line = ' '.join([ '='.join([ str(e) for e in pair ])
-                                 for pair in kwargs.items() ])
+        args_line = '\n'.join([ str(e) for e in args])
+        if args_line:
+            args_line += '\n'
 
-        self.urpm.stdin.write("%s %s\n" % (cmd, kwargs_line))
+        kwargs_line = '\n'.join([ '='.join([ str(e) for e in pair ])
+                                 for pair in kwargs.items() ])
+        if kwargs_line:
+            kwargs_line += '\n'
+
+        cmd_line = "%s\n%s%s\n" % (cmd, args_line, kwargs_line)
+        self.urpm.stdin.write(cmd_line)
+
         results = []
         while True:
             l = self.urpm.stdout.readline().strip()
             if not l:
                 break
+            if l == 'ERROR':
+                return (False, self.urpm.stdout.readline().strip())
             results.append(eval(l))
-        return results
+        return (True, results)
 
 
 class TaskWorker(object):
