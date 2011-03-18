@@ -105,8 +105,8 @@ class ListPackagesTask(TaskBase):
     """ List all available packages. """
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='a{ss}bs')
-    def Package(self, package_name, installed, summary):
+                         signature='a{ss}bbs')
+    def Package(self, package_name, installed, update, summary):
         pass
 
     def worker_callback(self, backend):
@@ -114,7 +114,8 @@ class ListPackagesTask(TaskBase):
         for result in results:
             installed = result.pop('installed')
             summary = result.pop('summary')
-            self.Package(result, installed, summary)
+            update = result.pop('update')
+            self.Package(result, installed, update, summary)
 
 
 class PackageDetailsTask(TaskBase):
