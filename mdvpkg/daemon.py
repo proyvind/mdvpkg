@@ -22,6 +22,7 @@
 """ Main daemon class. """
 
 
+import sys
 import dbus
 import dbus.exceptions
 import dbus.mainloop.glib
