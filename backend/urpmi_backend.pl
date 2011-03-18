@@ -48,19 +48,44 @@ my $urpm = urpm->new_parse_cmdline;
 my $db;
 urpm::media::configure($urpm);
 
-while (<>) {
-    chomp($_);
-    $_ or next;
-    my ($cmd, @args) = split /\s+/, $_;
+MAIN: {
+    eval {
+	defined(my $cmd = <>) or do {
+	    close_backend();
+	};
+	chomp($cmd);
 
-    my %args = ();
-    foreach (@args) {
-        my ($name, $value) = split /=/;
-        $args{$name} = $value;
+	my %args = ();
+	while (<>) {
+	    chomp;
+	    $_ or do {
+		my $task_func = "on_command__$cmd";
+		defined $main::{$task_func} 
+		    or die "Unknown task name: '$cmd'\n";
+
+		$main::{$task_func}->(%args);
+		print("\n");
+		return 1;
+	    };
+
+	    if (/([^=]+)=(.*)/) {
+		$args{$1} = $2;
+	    }
+	    else {
+		$args{$_} = ( $_ =~ s/^~// ? 0 : 1 );
+	    }
+	}
+
+	die "Malformed command argument: EOF\n";
     }
+    or do {
+	printf("ERROR\n%s\n", $@);
+    };
+    redo MAIN;
+}
 
-    # TODO Check if it's defined:
-    $main::{"on_command__$cmd"}->(%args);
+sub close_backend {
+    exit 0;
 }
 
 sub py_bool_str {
@@ -134,28 +159,19 @@ sub open_urpm_db {
 sub traverse_packages {
     my ($urpm, $db, $callback) = @_;
 
-    my %installed = ();
-
     # Traverse installable packages ...
     foreach my $pkg (@{$urpm->{depslist}}) {
         if ($pkg->flag_upgrade) {
 	    $callback->($pkg);
 	}
-	if ($pkg->flag_installed) {
-	    $installed{$pkg->fullname} = $pkg;
-	}
     }
 
     # Traverse installed packages ...
     $db->traverse(
-	sub {
+    	sub {
 	    my ($pkg) = @_;
-	    if (exists $installed{$pkg->fullname}) {
-		$pkg = $installed{$pkg->fullname};
-	    }
-	    else {
-		$pkg->set_flag_installed(1);
-	    }	    
+	    $pkg->set_flag_installed(1);
+	    $pkg->set_flag_upgrade(0);
 	    $callback->($pkg);
 	}
 	);
@@ -163,15 +179,46 @@ sub traverse_packages {
 
 sub get_media_name {
     my ($urpm, $pkg) = @_;
+
+    my $id;
     if ($pkg->id) {
-	my $media = URPM::pkg2media($urpm->{media}, $pkg);
-	return $media->{name};
+	$id = $pkg->id;
     }
-    return '';  # represents locally installed packages
+    elsif (my @pkgs = $urpm->packages_by_name($pkg->name)) {
+	foreach (@pkgs) {
+	    if ($_->fullname() eq $pkg->fullname()) {
+		$id = $_->id;
+		last;
+	    }
+	}
+    }
+
+    my $media = '';
+    if ($id) {
+	foreach (@{ $urpm->{media} }) {
+	    if ($id >= ($_->{start}||0) and $id <= ($_->{end}||0)) {
+		$media = $_->{name};
+		last;
+	    }
+	}
+    }
+    return $media;
 }
 
-sub is_installed {
-    return $_[0]->flag_installed and not $_[0]->flag_upgrade;
+sub get_status {
+    my ($pkg) = @_;
+    
+    if ($pkg->flag_installed and not $pkg->flag_upgrade) {
+	return 'local';
+    }
+
+    if ($pkg->flag_upgrade and $pkg->flag_upgrade) {
+	return 'upgrade';
+    }
+
+    if (not $pkg->flag_installed and $pkg->flag_upgrade) {
+	return 'new';
+    }
 }
 
 sub filter_package {
@@ -179,15 +226,42 @@ sub filter_package {
 
     %filters or return 1;
 
-    foreach (keys %filters) {
-	my $filter = $filters{$_};
-	if (/media/) {
-	    get_media_name($urpm, $pkg) !~ /$filter/ and return 0;
+    if (my $filter = $filters{'media'}) {
+	get_media_name($urpm, $pkg) eq $filter or return 0;
+    }
+
+    if (my $filter = $filters{'name'}) {
+	$pkg->name eq $filter or return 0;
+    }
+
+    if (my $filter = $filters{'group'}) {
+	$pkg->group eq $filter or return 0;
+    }
+
+    if (exists $filters{'local'}) {
+	if ($filters{'local'}) {
+	    $pkg->flag_installed && !$pkg->flag_upgrade or return 0;
 	}
 	else {
-	    # Any other filter is matched to URPM::Package
-	    # properties:
-	    $pkg->$_ !~ /$filter/ and return 0;
+	    $pkg->flag_upgrade or return 0;
+	}
+    }
+
+    if (exists $filters{'upgrade'}) {
+	if ($filters{'upgrade'}) {
+	    $pkg->flag_upgrade && $pkg->flag_installed or return 0;
+	}
+	else {
+	    not $pkg->flag_upgrade || not $pkg->flag_installed or return 0;
+	}
+    }
+
+    if (exists $filters{'new'}) {
+	if ($filters{'new'}) {
+	    $pkg->flag_upgrade && !$pkg->flag_installed or return 0;
+	}
+	else {
+	    $pkg->flag_installed or return 0;
 	}
     }
 
@@ -207,7 +281,6 @@ sub on_command__list_medias {
 	       py_bool_str($update), 
 	       py_bool_str($ignore))
     }
-    print "\n";
 }
 
 sub on_command__list_packages {
@@ -223,15 +296,12 @@ sub on_command__list_packages {
 	    print py_package_str(
 		$pkg,
 		[ qw(name version release arch summary) ],
-		bool => { 
-		    installed => $pkg->flag_installed,
-		    update => $pkg->flag_upgrade,
+		str => { 
+		    status => get_status($pkg)
 		}
 		);
 	}
 	);
-
-    print "\n";
 }
 
 sub on_command__list_groups {
@@ -242,7 +312,7 @@ sub on_command__list_groups {
 	$urpm, 
 	$db,
 	sub {
-	    my ($pkg, $installed) = @_;
+	    my ($pkg) = @_;
 	    my $group = $pkg->group();
 	    exists $groups{$group} or $groups{$group} = 0;
 	    ++$groups{$group};
@@ -253,22 +323,20 @@ sub on_command__list_groups {
 	my $count = $groups{$group};
 	print "('$group', $count)\n";
     }
-
-    print "\n";
 }
 
 sub on_command__package_details {
     my (%args) = @_;
     my $db = open_urpm_db();
-    my $name = $args{name};
 
-    foreach my $media (@{$urpm->{media}}) {
-        next if $media->{ignore};
-        my $media_name = $media->{name};
-        my $start = $media->{start};
-        my $end = $media->{end};
+    my $name = $args{name} 
+        or die "Missing required parameter: name\n";
 
-        foreach my $pkg (@{$urpm->{depslist}}[$start..$end]) {
+    traverse_packages(
+	$urpm,
+	$db,
+	sub {
+	    my ($pkg) = @_;
             if ($pkg->name eq $name) {
                 my $installtime = 0;
                 if ($pkg->flag_installed) {
@@ -277,15 +345,13 @@ sub on_command__package_details {
 		print py_package_str(
 		    $pkg, 					 
 		    [ qw(name version release arch group) ],
-		    str => { media => $media_name },
+		    str => { media => get_media_name($urpm, $pkg) },
 		    int => { installtime => $installtime,
 		             size => $pkg->size() },
 		    );
             }
-        }
-    }
-
-    print "\n";
+	}
+	);
 }
 
 sub on_command__search_files {
@@ -339,6 +405,4 @@ sub on_command__search_files {
 	printf("'%s', ", $_) for (@{ $results{$fn}{files} });
 	print "]}\n";
     }
-
-    print "\n";
 }
