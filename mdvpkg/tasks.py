@@ -122,8 +122,8 @@ class ListPackagesTask(TaskBase):
         self.kwargs = {}
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='a{ss}ss')
-    def Package(self, name, summary, status):
+                         signature='a{ss}sssst')
+    def Package(self, name, epoch, status, group, summary, size):
         pass
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -164,9 +164,12 @@ class ListPackagesTask(TaskBase):
                                        **self.kwargs)
         if success:
             for pkg in result:
+                epoch = pkg.pop('epoch')
+                group = pkg.pop('group')
                 summary = pkg.pop('summary')
                 status = pkg.pop('status')
-                self.Package(pkg, summary, status)
+                size = pkg.pop('size')
+                self.Package(pkg, epoch, status, group, summary, size)
         else:
             self.Error(result)
 
@@ -179,8 +182,8 @@ class PackageDetailsTask(TaskBase):
         self.name = name
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='a{ss}sstt')
-    def PackageDetails(self, name, group, media, size, installtime):
+                         signature='a{ss}st')
+    def PackageDetails(self, name, media, installtime):
         pass
 
     def worker_callback(self, backend):
@@ -188,15 +191,9 @@ class PackageDetailsTask(TaskBase):
                                        name=self.name)
         if success:
             for pkg in result:
-                group = pkg.pop('group')
-                size = pkg.pop('size')
-                installtime = pkg.pop('installtime')
                 media = pkg.pop('media')
-                self.PackageDetails(pkg,
-                                    group,
-                                    media,
-                                    size,
-                                    installtime)
+                installtime = pkg.pop('installtime')
+                self.PackageDetails(pkg, media, installtime)
         else:
             self.Error(result)
 
