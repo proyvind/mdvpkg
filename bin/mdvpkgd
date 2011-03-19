@@ -24,6 +24,7 @@
 """ Script to run the mdvpkg daemon service. """
 
 
+import logging
 import sys
 import os
 
@@ -51,6 +52,11 @@ parser.add_option('--session',
                   dest='session',
                   help="Connect mdvpkgd's DBus service to the session "
                        "bus (instead of the system bus).")
+parser.add_option("-d", "--debug",
+                  default=False,
+                  action="store_true",
+                  dest="debug",
+                  help="Show debug messages and information.")
 parser.add_option('--backend',
                   default=False,
                   action='store',
@@ -62,6 +68,12 @@ bus = None
 if opts.session:
     import dbus
     bus = dbus.SessionBus()
+
+log = logging.getLogger("mdvpkgd")
+if opts.debug == True:
+    log.setLevel(logging.DEBUG)
+else:
+    log.setLevel(logging.INFO)
 
 d = mdvpkg.daemon.MDVPKGDaemon(bus=bus, backend_path=opts.backend)
 d.run()

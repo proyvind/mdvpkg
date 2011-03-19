@@ -22,6 +22,7 @@
 """ Task classes and task worker for mdvpkg. """
 
 
+import logging
 import re
 import gobject
 import dbus
@@ -36,6 +37,8 @@ import mdvpkg.worker
 # Delay before removing tasks from the bus:
 TASK_DEL_TIMEOUT = 5
 
+log = logging.getLogger("mdvpkgd.task")
+
 
 class TaskBase(dbus.service.Object):
     """ Base class for all tasks. """
@@ -48,6 +51,9 @@ class TaskBase(dbus.service.Object):
             dbus.service.BusName(mdvpkg.DBUS_SERVICE, self._bus),
             self.path
             )
+        log.info('Task created: %s, %s',
+                 self.__class__.__name__,
+                 self.path)
         self._sender = sender
         self._worker = worker
         # Passed to backend when call_backend is called ...
@@ -59,17 +65,19 @@ class TaskBase(dbus.service.Object):
                          out_signature='',
                          sender_keyword='sender')
     def Run(self, sender):
-        print 'Task.Run() sender=%s, task=%s' % (sender, self.path)
+        log.info('Run method called: %s', sender)
         self._worker.push(self)
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='')
     def Finished(self):
+        log.info('Finished signal emitted')
         pass
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='s')
     def Error(self, msg):
+        log.info('Error signal emitted: %s', msg)
         pass
 
     def worker_callback(self, backend):
@@ -79,6 +87,7 @@ class TaskBase(dbus.service.Object):
     def exit_callback(self):
         """ Called by the worker when the task is finished. """
         self.Finished()
+        log.info('Task removed: %s', self.path)
         # mall timeout so the signal can propagate:
         gobject.timeout_add_seconds(TASK_DEL_TIMEOUT,
                                     self.remove_from_connection)
@@ -94,6 +103,7 @@ class TaskBase(dbus.service.Object):
                                 **self.backend_kwargs):
                 yield l
         except mdvpkg.worker.BackendDoError as msg:
+            log.debug('backend error: %s', msg)
             self.Error(msg.args[0])
 
 
@@ -103,6 +113,7 @@ class ListMediasTask(TaskBase):
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='sbb')
     def Media(self, media_name, update, ignore):
+        log.debug('Media signal emitted: %s', media_name)
         pass
 
     def worker_callback(self, backend):
@@ -116,6 +127,7 @@ class ListGroupsTask(TaskBase):
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='si')
     def Group(self, group, pkg_count):
+        log.debug('Group signal emitted: %s', group)
         pass
 
     def worker_callback(self, backend):
@@ -129,6 +141,7 @@ class ListPackagesTask(TaskBase):
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='a{ss}sssst')
     def Package(self, name, epoch, status, group, summary, size):
+        log.debug('Package signal emitted: %s', name)
         pass
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -136,6 +149,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterName(self, name, sender):
+        log.info('FilterName() called: %s', name)
         self.backend_kwargs['name'] = name
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -143,13 +157,15 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterMedia(self, media, sender):
-         self.backend_kwargs['media'] = media
+        log.info('FilterMedia() called: %s', media)
+        self.backend_kwargs['media'] = media
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='s',
                          out_signature='',
                          sender_keyword='sender')
     def FilterGroup(self, group, sender):
+        log.info('FilterGroup() called: %s', group)
         self.backend_kwargs['group'] = group
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -157,6 +173,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterStatus(self, filter, sender):
+        log.info('FilterStatus() called: %s', filter)
         if not re.match('~?(new|upgrade|local)', filter):
             self.Error('Unknow status filter: %s' % filter)
             self.exit_callback()
@@ -183,6 +200,7 @@ class PackageDetailsTask(TaskBase):
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='a{ss}st')
     def PackageDetails(self, name, media, installtime):
+        log.debug('PackageDetails signal emitted: %s', name)
         pass
 
     def worker_callback(self, backend):
@@ -202,6 +220,7 @@ class SearchFilesTask(TaskBase):
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='ssssas')
     def PackageFiles(self, name, version, release, arch, files):
+        log.debug('PackageFiles signal emitted: %s, %s', name, files)
         pass
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -209,6 +228,7 @@ class SearchFilesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def SetRegex(self, regex, sender):
+        log.info('SetRegex() called: %s', regex)
         """ Match file names using a regex. """
         self.args.append('fuzzy')
 

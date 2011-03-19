@@ -22,6 +22,7 @@
 """ Task classes and task worker for mdvpkg. """
 
 
+import logging
 import gobject
 import subprocess
 import threading
@@ -30,6 +31,9 @@ import Queue
 
 WAIT_TASK_TIMEOUT = 6
 gobject.threads_init()
+
+log_backend = logging.getLogger('mdvpkgd.backend')
+log = logging.getLogger('mdvpkgd.worker')
 
 
 class BackendError(Exception):
@@ -51,16 +55,21 @@ class Backend(object):
 
     def run(self):
         if self.urpm:
-            raise RuntimeError('backend already running')
+            log_backend.error("run() and backend's already running")
+            return
         self.urpm = subprocess.Popen('',
                                      executable=self.path,
                                      stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE)
+        log_backend.debug('backend started')
+
     def kill(self):
         if not self.urpm:
-            raise RuntimeError("backend's not running")
+            log_backend.error("kill() and backend's running")
+            return
         self.urpm.terminate()
         self.urpm = None
+        log_backend.debug('backend killed')
 
     def running(self):
         if self.urpm != None:
@@ -115,11 +124,12 @@ class TaskWorker(object):
 
     def _work_loop(self):
         """ Worker's thread activity method. """
+        log.info("Thread initialized")
         self.__work = True
         while self.__work:
             try:
                 task = self._queue.get()
-                print 'Worker found task: %s, %s' % (task.path, task._sender)
+                log.debug('Got a task: %s', task.path)
                 if not self._backend.running():
                     self._backend.run()
                 task.worker_callback(self._backend)
@@ -127,3 +137,4 @@ class TaskWorker(object):
             except Queue.Empty:
                 if self._backend.running():
                     self._backend.kill()
+        log.info("worker's thread killed")

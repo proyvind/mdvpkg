@@ -22,6 +22,8 @@
 """ Main daemon class. """
 
 
+import logging
+import logging.handlers
 import sys
 import dbus
 import dbus.exceptions
@@ -38,6 +40,29 @@ import mdvpkg.worker
 # setup default dbus mainloop:
 dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
+# setup logging ...
+log = logging.getLogger("mdvpkgd")
+try:
+    _syslog = logging.handlers.SysLogHandler(
+                  address="/dev/log",
+                  facility=logging.handlers.SysLogHandler.LOG_DAEMON
+              )
+    _syslog.setLevel(logging.INFO)
+    _formatter = logging.Formatter("%(name)s: %(levelname)s: "
+                                       "%(message)s")
+    _syslog.setFormatter(_formatter)
+except:
+    pass
+else:
+    log.addHandler(_syslog)
+
+_console = logging.StreamHandler()
+_formatter = logging.Formatter("%(asctime)s %(name)s [%(levelname)s]: "
+                                   "%(message)s",
+                               "%T")
+_console.setFormatter(_formatter)
+log.addHandler(_console)
+
 
 class MDVPKGDaemon(dbus.service.Object):
     """
@@ -49,6 +74,7 @@ class MDVPKGDaemon(dbus.service.Object):
     """
 
     def __init__(self, bus=None, backend_path=None):
+        log.info('Starting daemon')
         if not bus:
             bus = dbus.SystemBus()
         self._bus = bus
@@ -60,7 +86,8 @@ class MDVPKGDaemon(dbus.service.Object):
                                             self._bus,
                                             do_not_queue=True)
         except dbus.exceptions.NameExistsException:
-            print 'Someone is using %s service name...' % mdvpkg.DBUS_SERVICE
+            log.critical('Someone is using %s service name...',
+                         mdvpkg.DBUS_SERVICE)
             sys.exit(1)
         dbus.service.Object.__init__(self, bus_name, mdvpkg.DBUS_PATH)
         self._worker = mdvpkg.worker.TaskWorker(backend_path)
@@ -73,6 +100,7 @@ class MDVPKGDaemon(dbus.service.Object):
                          out_signature='s',
                          sender_keyword='sender')
     def ListMedias(self, sender):
+        log.info('ListMedias() called')
         return self._create_task(mdvpkg.tasks.ListMediasTask,
                                  sender)
         
@@ -81,6 +109,7 @@ class MDVPKGDaemon(dbus.service.Object):
                          out_signature='s',
                          sender_keyword='sender')
     def ListGroups(self, sender):
+        log.info('ListGroups() called')
         return self._create_task(mdvpkg.tasks.ListGroupsTask,
                                  sender)
 
@@ -89,6 +118,7 @@ class MDVPKGDaemon(dbus.service.Object):
                          out_signature='s',
                          sender_keyword='sender')
     def ListPackages(self, sender):
+        log.info('ListPackages() called')
         return self._create_task(mdvpkg.tasks.ListPackagesTask,
                                  sender)
 
@@ -97,6 +127,7 @@ class MDVPKGDaemon(dbus.service.Object):
                          out_signature='s',
                          sender_keyword='sender')
     def PackageDetails(self, name, sender):
+        log.info('PackageDetails() called: %s', name)
         return self._create_task(mdvpkg.tasks.PackageDetailsTask,
                                  sender,
                                  name)
@@ -106,11 +137,15 @@ class MDVPKGDaemon(dbus.service.Object):
                          out_signature='s',
                          sender_keyword='sender')
     def SearchFiles(self, files, sender):
+        log.info('SearchFiles() called: %s', files)
         return self._create_task(mdvpkg.tasks.SearchFilesTask,
                                  sender,
                                  files)
 
     def _create_task(self, task_class, sender, *args):
-        print 'Request task: %s, %s' % (task_class.__name__, sender)
+        log.debug('_create_task(): %s, %s, args=%s',
+                  task_class.__name__,
+                  sender,
+                  args)
         task = task_class(self._bus, sender, self._worker, *args)
         return task.path
