@@ -32,6 +32,16 @@ WAIT_TASK_TIMEOUT = 6
 gobject.threads_init()
 
 
+class BackendError(Exception):
+    """Base class for backend exceptions."""
+    pass
+
+
+class BackendDoError(BackendError):
+    """Raised when backend terminated a command in error."""
+    pass
+
+
 class Backend(object):
     """ Represents the running urpm backend. """
 
@@ -76,15 +86,13 @@ class Backend(object):
         cmd_line = "%s\n%s%s\n" % (cmd, args_line, kwargs_line)
         self.urpm.stdin.write(cmd_line)
 
-        results = []
         while True:
             l = self.urpm.stdout.readline().strip()
             if not l:
-                break
+                return
             if l == 'ERROR':
-                return (False, self.urpm.stdout.readline().strip())
-            results.append(eval(l))
-        return (True, results)
+                raise BackendDoError(self.urpm.stdout.readline().strip())
+            yield eval(l)
 
 
 class TaskWorker(object):

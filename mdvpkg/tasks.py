@@ -30,6 +30,7 @@ import dbus.service
 import uuid
 
 import mdvpkg
+import mdvpkg.worker
 
 
 # Delay before removing tasks from the bus:
@@ -49,6 +50,9 @@ class TaskBase(dbus.service.Object):
             )
         self._sender = sender
         self._worker = worker
+        # Passed to backend when call_backend is called ...
+        self.backend_args = []
+        self.backend_kwargs = {}
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='',
@@ -73,10 +77,24 @@ class TaskBase(dbus.service.Object):
         raise NotImplementedError()
 
     def exit_callback(self):
+        """ Called by the worker when the task is finished. """
         self.Finished()
         # mall timeout so the signal can propagate:
         gobject.timeout_add_seconds(TASK_DEL_TIMEOUT,
                                     self.remove_from_connection)
+
+    def _backend_helper(self, backend, command):
+        """
+        Helper to receive call backend commands, handling backend
+        errors.  It yields each backend reponse.
+        """
+        try:
+            for l in backend.do(command,
+                                *self.backend_args,
+                                **self.backend_kwargs):
+                yield l
+        except mdvpkg.worker.BackendDoError as msg:
+            self.Error(msg.args[0])
 
 
 class ListMediasTask(TaskBase):
@@ -88,12 +106,8 @@ class ListMediasTask(TaskBase):
         pass
 
     def worker_callback(self, backend):
-        (success, result) = backend.do('list_medias')
-        if success:
-            for media in result:
-                self.Media(*media)
-        else:
-            self.Error(result)
+        for media in self._backend_helper(backend, 'list_medias'):
+            self.Media(*media)
 
 
 class ListGroupsTask(TaskBase):
@@ -105,21 +119,12 @@ class ListGroupsTask(TaskBase):
         pass
 
     def worker_callback(self, backend):
-        (success, result) = backend.do('list_groups')
-        if success:
-            for group in result:
-                self.Group(*group)
-        else:
-            self.Error(result)
+        for group in self._backend_helper(backend, 'list_groups'):
+            self.Group(*group)
 
 
 class ListPackagesTask(TaskBase):
     """ List all available packages. """
-
-    def __init__(self, bus, sender, worker):
-        TaskBase.__init__(self, bus, sender, worker)
-        self.args = []
-        self.kwargs = {}
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='a{ss}sssst')
@@ -131,21 +136,21 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterName(self, name, sender):
-        self.kwargs['name'] = name
+        self.backend_kwargs['name'] = name
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='s',
                          out_signature='',
                          sender_keyword='sender')
     def FilterMedia(self, media, sender):
-         self.kwargs['media'] = media
+         self.backend_kwargs['media'] = media
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='s',
                          out_signature='',
                          sender_keyword='sender')
     def FilterGroup(self, group, sender):
-        self.kwargs['group'] = group
+        self.backend_kwargs['group'] = group
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='s',
@@ -156,22 +161,16 @@ class ListPackagesTask(TaskBase):
             self.Error('Unknow status filter: %s' % filter)
             self.exit_callback()
         else:
-            self.args.append(filter)
+            self.backend_args.append(filter)
 
     def worker_callback(self, backend):
-        (success, result) = backend.do('list_packages',
-                                       *self.args,
-                                       **self.kwargs)
-        if success:
-            for pkg in result:
-                epoch = pkg.pop('epoch')
-                group = pkg.pop('group')
-                summary = pkg.pop('summary')
-                status = pkg.pop('status')
-                size = pkg.pop('size')
-                self.Package(pkg, epoch, status, group, summary, size)
-        else:
-            self.Error(result)
+        for pkg in self._backend_helper(backend, 'list_packages'):
+            epoch = pkg.pop('epoch')
+            group = pkg.pop('group')
+            summary = pkg.pop('summary')
+            status = pkg.pop('status')
+            size = pkg.pop('size')
+            self.Package(pkg, epoch, status, group, summary, size)
 
 
 class PackageDetailsTask(TaskBase):
@@ -179,7 +178,7 @@ class PackageDetailsTask(TaskBase):
 
     def __init__(self, bus, sender, worker, name):
         TaskBase.__init__(self, bus, sender, worker)
-        self.name = name
+        self.backend_kwargs['name'] = name
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='a{ss}st')
@@ -187,15 +186,10 @@ class PackageDetailsTask(TaskBase):
         pass
 
     def worker_callback(self, backend):
-        (success, result) = backend.do('package_details',
-                                       name=self.name)
-        if success:
-            for pkg in result:
-                media = pkg.pop('media')
-                installtime = pkg.pop('installtime')
-                self.PackageDetails(pkg, media, installtime)
-        else:
-            self.Error(result)
+        for pkg in self._backend_helper(backend, 'package_details'):
+            media = pkg.pop('media')
+            installtime = pkg.pop('installtime')
+            self.PackageDetails(pkg, media, installtime)
 
 
 class SearchFilesTask(TaskBase):
@@ -203,8 +197,7 @@ class SearchFilesTask(TaskBase):
 
     def __init__(self, bus, sender, worker, pattern):
         TaskBase.__init__(self, bus, sender, worker)
-        self.args = []
-        self.kwargs = {'pattern': pattern}
+        self.backend_kwargs['pattern'] = pattern
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='ssssas')
@@ -220,13 +213,6 @@ class SearchFilesTask(TaskBase):
         self.args.append('fuzzy')
 
     def worker_callback(self, backend):
-        (success, result) = backend.do('search_files',
-                                       *self.args,
-                                       **self.kwargs)
-        if success:
-            for r in result:
-                self.PackageFiles(r['name'], r['version'], r['release'],
+        for r in self._backend_helper(backend, 'search_files'):
+            self.PackageFiles(r['name'], r['version'], r['release'],
                                   r['arch'], r['files'])
-        else:
-            self.Error(result)
-
