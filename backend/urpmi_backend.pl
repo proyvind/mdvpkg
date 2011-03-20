@@ -23,15 +23,6 @@
 ##
 
 
-## TODO ##
-#
-# 1. Use asynchronous responses (requires a better ipc protocol),
-#    allowing caller to use co-routines.
-#
-# 2. Include error handling in ipc protocol.
-#
-
-
 use warnings;
 use strict;
 
@@ -40,6 +31,7 @@ use urpm;
 use urpm::media;
 use urpm::args;
 use urpm::select;
+
 
 $| = 1;
 
@@ -58,13 +50,14 @@ MAIN: {
 	my %args = ();
 	while (<>) {
 	    chomp;
+	    # empty line means "run command":
 	    $_ or do {
 		my $task_func = "on_command__$cmd";
 		defined $main::{$task_func} 
 		    or die "Unknown task name: '$cmd'\n";
-
 		$main::{$task_func}->(%args);
-		print("\n");
+		end();
+		# For the eval block:
 		return 1;
 	    };
 
@@ -79,13 +72,38 @@ MAIN: {
 	die "Malformed command argument: EOF\n";
     }
     or do {
-	printf("ERROR\n%s\n", $@);
+	chomp($@);
+	error($@);
     };
     redo MAIN;
 }
 
 sub close_backend {
     exit 0;
+}
+
+# result - send a result response to caller
+sub result {
+    _send_response('RESULT', @_);
+}
+
+# error - send an error response to caller
+sub error {
+    _send_response('ERROR', @_);
+}
+
+# log - send a log response to caller
+sub log {
+    _send_response('LOG', @_);
+}
+
+sub end {
+    _send_response('END', '');
+}
+
+sub _send_response {
+    my ($tag, $format, @args) = @_;
+    printf("%s %s\n", $tag, sprintf($format, @args));
 }
 
 sub py_bool_str {
@@ -133,7 +151,7 @@ sub py_package_str {
 	}
     }
 
-    $py_str .= "}\n";
+    $py_str .= '}';
     return $py_str;
 }
 
@@ -276,7 +294,7 @@ sub on_command__list_medias {
     foreach (@{$urpm->{media}}) {
 	my ($name, $update, $ignore) 
 	    = ($_->{name}, $_->{update}, $_->{ignore});
-	printf("('%s', %s, %s)\n", 
+	result("('%s', %s, %s)", 
 	       $name, 
 	       py_bool_str($update), 
 	       py_bool_str($ignore))
@@ -294,7 +312,7 @@ sub on_command__list_packages {
 	    my ($pkg) = @_;
 	    filter_package($pkg, %args) or return;
 
-	    print py_package_str(
+	    result py_package_str(
 		$pkg,
 		[ qw(name version release arch epoch group summary) ],
 		str => { 
@@ -325,7 +343,7 @@ sub on_command__list_groups {
 
     foreach my $group (keys %groups) {
 	my $count = $groups{$group};
-	print "('$group', $count)\n";
+	result "('$group', $count)";
     }
 }
 
@@ -352,7 +370,7 @@ sub on_command__package_details {
 		    $installtime = `rpm -q $name --qf '%{installtime}'`;
 		}
 
-		print py_package_str(
+		result py_package_str(
 		    $pkg, 					 
 		    [ qw(name version release arch epoch) ],
 		    str => { media => get_media_name($urpm, $pkg) },
@@ -405,13 +423,16 @@ sub on_command__search_files {
 
     foreach my $fn (keys %results) {
 	my $xml_pkg = $results{$fn}{pkg};
-	printf("{'name': '%s', 'version': '%s', 'release': '%s', " 
-	       . "'arch': '%s', 'files': [",
+	my $py_str = sprintf("{'name': '%s', "
+			         . "'version': '%s', "
+			         . "'release': '%s', " 
+			         . "'arch': '%s', 'files': [",
 	       $xml_pkg->name,
 	       $xml_pkg->version,
 	       $xml_pkg->release,
 	       $xml_pkg->arch);
-	printf("'%s', ", $_) for (@{ $results{$fn}{files} });
-	print "]}\n";
+	$py_str .= sprintf("'%s', ", $_) for (@{ $results{$fn}{files} });
+	$py_str .= ']}';
+	result($py_str)
     }
 }

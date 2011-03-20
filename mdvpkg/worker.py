@@ -55,7 +55,7 @@ class Backend(object):
 
     def run(self):
         if self.urpm:
-            log_backend.error("run() and backend's already running")
+            log_backend.error("run() called and backend's already running.")
             return
         self.urpm = subprocess.Popen('',
                                      executable=self.path,
@@ -65,7 +65,7 @@ class Backend(object):
 
     def kill(self):
         if not self.urpm:
-            log_backend.error("kill() and backend's running")
+            log_backend.error("kill() called and backend's running.")
             return
         self.urpm.terminate()
         self.urpm = None
@@ -78,11 +78,11 @@ class Backend(object):
     
     def do(self, cmd, *args, **kwargs):
         """
-        Send a command to the backend and return a list of results.
-
-        Results are python objects, which were created from eval()'d
-        string returned by the backend.
+        Send a command to the backend and return a response generator.
         """
+
+        # Generating command for the backend ...
+
         args_line = '\n'.join([ str(e) for e in args])
         if args_line:
             args_line += '\n'
@@ -95,13 +95,41 @@ class Backend(object):
         cmd_line = "%s\n%s%s\n" % (cmd, args_line, kwargs_line)
         self.urpm.stdin.write(cmd_line)
 
+        # Response loop ...
+
         while True:
-            l = self.urpm.stdout.readline().strip()
-            if not l:
-                return
-            if l == 'ERROR':
-                raise BackendDoError(self.urpm.stdout.readline().strip())
-            yield eval(l)
+            resp = self.urpm.stdout.readline()
+            log_backend.debug('response: %s', resp)
+
+            # Incomplete line, means the pipe was closed before a
+            # whole response was received from backend:
+            if not resp or not resp.endswith('\n'):
+                if self.running():
+                    self.kill()
+                    raise BackendDoError(
+                        "Backend's communication pipe closed, killing."
+                        )
+                else:
+                    raise BackendDoError('Backend died unexpectedly.')
+
+            (tag, data) = self._parse_response(resp)
+
+            # ERROR and END will stop the response generation ...
+
+            if tag == 'ERROR':
+                raise BackendDoError(data)                
+            elif tag == 'END':
+                break
+            elif tag == 'LOG':
+                log.debug(data)
+            elif tag == 'RESULT':
+                yield eval(data)
+            else:
+                raise BackendDoError('Unknown response: %s' % resp)
+            
+    def _parse_response(self, l):
+        i = l.find(' ')
+        return l[:i], l[i+1:].strip()
 
 
 class TaskWorker(object):
