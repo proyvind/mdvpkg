@@ -35,6 +35,9 @@ use urpm::select;
 
 $| = 1;
 
+binmode STDOUT, ':encoding(utf8)';
+binmode STDIN, ':encoding(utf8)';
+
 my $urpm = urpm->new_parse_cmdline;
 # URPM db, initially not opened
 my $db;
