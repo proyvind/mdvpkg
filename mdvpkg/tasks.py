@@ -142,7 +142,6 @@ class ListPackagesTask(TaskBase):
                          signature='a{ss}sssst')
     def Package(self, name, epoch, status, group, summary, size):
         log.debug('Package signal emitted: %s', name)
-        pass
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='s',
