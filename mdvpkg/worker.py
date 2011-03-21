@@ -29,7 +29,7 @@ import threading
 import Queue
 
 
-WAIT_TASK_TIMEOUT = 6
+WAIT_TASK_TIMEOUT = 15
 gobject.threads_init()
 
 log_backend = logging.getLogger('mdvpkgd.backend')
@@ -156,7 +156,7 @@ class TaskWorker(object):
         self.__work = True
         while self.__work:
             try:
-                task = self._queue.get()
+                task = self._queue.get(timeout=WAIT_TASK_TIMEOUT)
                 log.debug('Got a task: %s', task.path)
                 if not self._backend.running():
                     self._backend.run()
@@ -165,4 +165,6 @@ class TaskWorker(object):
             except Queue.Empty:
                 if self._backend.running():
                     self._backend.kill()
+            except Exception as e:
+                log.error("Raised in worker's thread", exec_info=True)
         log.info("worker's thread killed")
