@@ -157,7 +157,7 @@ class TaskWorker(object):
 
     def inactive(self, idle_timeout):
         return time.time() - self._last_action_timestamp > idle_timeout \
-                   and self._queue.empty() \
+                   and len(self._queue) == 0 \
                    and not self._task
 
     def stop(self):
