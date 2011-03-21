@@ -39,9 +39,24 @@ binmode STDOUT, ':encoding(utf8)';
 binmode STDIN, ':encoding(utf8)';
 
 my $urpm = urpm->new_parse_cmdline;
-# URPM db, initially not opened
-my $db;
+
+my $db;                        # URPM db, initially not opened
+
+our %control;
+$control{cancellable} = 1;     # tasks are cancellable by default
+$control{term_requested} = 0;  # flag to terminate after a task
+
 urpm::media::configure($urpm);
+
+$SIG{TERM} = sub {
+    if (not $control{cancellable}) {
+	$control{term_requested} = 1;
+    }
+    else {
+	exit 1;
+    }
+};
+
 
 MAIN: {
     eval {
@@ -60,6 +75,13 @@ MAIN: {
 		    or die "Unknown task name: '$cmd'\n";
 		$main::{$task_func}->(%args);
 		end();
+
+		$control{cancellable} = 1;
+
+		if ($control{term_requested}) {
+		    exit 1;
+		}
+
 		# For the eval block:
 		return 1;
 	    };
@@ -96,7 +118,7 @@ sub error {
 }
 
 # log - send a log response to caller
-sub log {
+sub log_ {
     _send_response('LOG', @_);
 }
 
@@ -106,7 +128,16 @@ sub end {
 
 sub _send_response {
     my ($tag, $format, @args) = @_;
-    printf("%s %s\n", $tag, sprintf($format, @args));
+    my $s;
+
+    if (@args) {
+	$s = sprintf($format, @args);
+    }
+    else {
+	$s = $format;
+    }
+
+    printf("%s %s\n", $tag, $s);
 }
 
 sub py_bool_str {
