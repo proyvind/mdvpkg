@@ -28,7 +28,7 @@ import logging
 import gobject
 import subprocess
 import threading
-import Queue
+import collections
 
 
 WAIT_TASK_TIMEOUT = 15
@@ -139,18 +139,21 @@ class TaskWorker(object):
     """ A worker for tasks.  Tasks are queued in order of addition. """
     
     def __init__(self, backend_path):
-        self._queue = Queue.Queue()
+        self._queue = collections.deque()
         self._backend = Backend(backend_path)
         self._thread = threading.Thread(target=self._work_loop,
                                         name='mdvpkg-worker-thread')
+        self._new_task = threading.Event()
         self._thread.daemon = True
         self._thread.start()
         self._task = None
         self._last_action_timestamp = time.time()
+        self._backend.run()
 
     def push(self, task):
         """ Add a task to the task queue. """
-        self._queue.put(task, False)
+        self._queue.append(task)
+        self._new_task.set()
 
     def inactive(self, idle_timeout):
         return time.time() - self._last_action_timestamp > idle_timeout \
@@ -160,6 +163,8 @@ class TaskWorker(object):
     def stop(self):
         """ Signal the worker process to do the last task and quit. """
         self.__work = False
+        self._new_task.set()
+        self._thread.join()
 
     def _work_loop(self):
         """ Worker's thread activity method. """
@@ -167,20 +172,25 @@ class TaskWorker(object):
         self.__work = True
         while self.__work:
             try:
-                self._task = self._queue.get(timeout=WAIT_TASK_TIMEOUT)
-                self._last_action_timestamp = time.time()
-                log.debug('Got a task: %s', self._task.path)
-                if not self._backend.running():
-                    self._backend.run()
-                self._task.worker_callback(self._backend)
-                self._task.exit_callback()
-            except Queue.Empty:
-                if self._backend.running():
+                self._task = self._queue.popleft()
+            except IndexError:
+                if not self._new_task.wait(WAIT_TASK_TIMEOUT) \
+                       and self._backend.running():
                     log.info('No tasks available, Killing backend')
                     self._backend.kill()
-            except Exception as e:
-                log.exception("Raised in worker's thread")
-            self._task = None
+            else:
+                self._new_task.clear()
+                try:
+                    self._last_action_timestamp = time.time()
+                    log.debug('Got a task: %s', self._task.path)
+                    if not self._backend.running():
+                        self._backend.run()
+                    self._task.worker_callback(self._backend)
+                    self._task.exit_callback()
+                    self._task = None
+                except Exception as e:
+                    log.exception("Raised in worker's thread")
+
         if self._backend.running():
             self._backend.kill()
         log.info("Worker's thread killed")
