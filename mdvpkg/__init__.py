@@ -22,7 +22,7 @@
 
 __author__  = "J. Victor Martins <jvdm@mandriva.com>"
 __state__   = "development"
-__version__ = "0.4.3"
+__version__ = "0.4.4"
 
 DBUS_SERVICE = 'org.mandrivalinux.mdvpkg'
 DBUS_INTERFACE = 'org.mandrivalinux.mdvpkg'
