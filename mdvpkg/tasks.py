@@ -103,7 +103,7 @@ class TaskBase(dbus.service.Object):
                                 **self.backend_kwargs):
                 yield l
         except mdvpkg.worker.BackendDoError as msg:
-            log.debug('backend error: %s', msg)
+            log.debug('Backend error: %s', msg)
             self.Error(msg.args[0])
 
 

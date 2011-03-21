@@ -22,6 +22,8 @@
 """ Task classes and task worker for mdvpkg. """
 
 
+import signal
+import time
 import logging
 import gobject
 import subprocess
@@ -61,15 +63,17 @@ class Backend(object):
                                      executable=self.path,
                                      stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE)
-        log_backend.debug('backend started')
+        log_backend.debug('Backend started')
 
     def kill(self):
         if not self.urpm:
             log_backend.error("kill() called and backend's running.")
             return
-        self.urpm.terminate()
+        self.urpm.send_signal(signal.SIGTERM)
+        # wait for child to terminate
+        self.urpm.communicate()
         self.urpm = None
-        log_backend.debug('backend killed')
+        log_backend.debug('Backend killed')
 
     def running(self):
         if self.urpm != None:
@@ -99,7 +103,6 @@ class Backend(object):
 
         while True:
             resp = self.urpm.stdout.readline()
-            log_backend.debug('response: %s', resp)
 
             # Incomplete line, means the pipe was closed before a
             # whole response was received from backend:
@@ -121,7 +124,7 @@ class Backend(object):
             elif tag == 'END':
                 break
             elif tag == 'LOG':
-                log.debug(data)
+                log_backend.debug(data)
             elif tag == 'RESULT':
                 yield eval(data)
             else:
@@ -140,11 +143,19 @@ class TaskWorker(object):
         self._backend = Backend(backend_path)
         self._thread = threading.Thread(target=self._work_loop,
                                         name='mdvpkg-worker-thread')
+        self._thread.daemon = True
         self._thread.start()
+        self._task = None
+        self._last_action_timestamp = time.time()
 
     def push(self, task):
         """ Add a task to the task queue. """
         self._queue.put(task, False)
+
+    def inactive(self, idle_timeout):
+        return time.time() - self._last_action_timestamp > idle_timeout \
+                   and self._queue.empty() \
+                   and not self._task
 
     def stop(self):
         """ Signal the worker process to do the last task and quit. """
@@ -156,15 +167,20 @@ class TaskWorker(object):
         self.__work = True
         while self.__work:
             try:
-                task = self._queue.get(timeout=WAIT_TASK_TIMEOUT)
-                log.debug('Got a task: %s', task.path)
+                self._task = self._queue.get(timeout=WAIT_TASK_TIMEOUT)
+                self._last_action_timestamp = time.time()
+                log.debug('Got a task: %s', self._task.path)
                 if not self._backend.running():
                     self._backend.run()
-                task.worker_callback(self._backend)
-                task.exit_callback()
+                self._task.worker_callback(self._backend)
+                self._task.exit_callback()
             except Queue.Empty:
                 if self._backend.running():
+                    log.info('No tasks available, Killing backend')
                     self._backend.kill()
             except Exception as e:
-                log.error("Raised in worker's thread", exec_info=True)
-        log.info("worker's thread killed")
+                log.exception("Raised in worker's thread")
+            self._task = None
+        if self._backend.running():
+            self._backend.kill()
+        log.info("Worker's thread killed")

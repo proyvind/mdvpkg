@@ -30,6 +30,7 @@ import dbus.exceptions
 import dbus.mainloop.glib
 import dbus.service
 import gobject
+import signal 
 
 import mdvpkg
 import mdvpkg.exceptions
@@ -63,6 +64,9 @@ _formatter = logging.Formatter("%(asctime)s %(name)s [%(levelname)s]: "
 _console.setFormatter(_formatter)
 log.addHandler(_console)
 
+IDLE_CHECK_INTERVAL = 1000
+IDLE_TIMEOUT = 5 * 60
+
 
 class MDVPKGDaemon(dbus.service.Object):
     """
@@ -75,6 +79,10 @@ class MDVPKGDaemon(dbus.service.Object):
 
     def __init__(self, bus=None, backend_path=None):
         log.info('Starting daemon')
+
+        signal.signal(signal.SIGQUIT, self._quit_handler)
+        signal.signal(signal.SIGTERM, self._quit_handler)
+
         if not bus:
             bus = dbus.SystemBus()
         self._bus = bus
@@ -91,9 +99,13 @@ class MDVPKGDaemon(dbus.service.Object):
             sys.exit(1)
         dbus.service.Object.__init__(self, bus_name, mdvpkg.DBUS_PATH)
         self._worker = mdvpkg.worker.TaskWorker(backend_path)
+        gobject.timeout_add(IDLE_CHECK_INTERVAL, self._check_for_inactivity)
 
     def run(self):
-        self._loop.run()
+        try:
+            self._loop.run()
+        except KeyboardInterrupt:
+            self.Quit(None)
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='',
@@ -142,6 +154,18 @@ class MDVPKGDaemon(dbus.service.Object):
                                  sender,
                                  files)
 
+    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
+                         in_signature="",
+                         out_signature="",
+                         sender_keyword="sender")
+    def Quit(self, sender):
+        """ Request a shutdown of the service. """
+        log.info("Shutdown was requested")
+        log.debug("Quitting main loop...")
+        self._loop.quit()
+        log.debug("Terminating worker...")
+        self._worker.stop()
+
     def _create_task(self, task_class, sender, *args):
         log.debug('_create_task(): %s, %s, args=%s',
                   task_class.__name__,
@@ -149,3 +173,20 @@ class MDVPKGDaemon(dbus.service.Object):
                   args)
         task = task_class(self._bus, sender, self._worker, *args)
         return task.path
+
+    def _quit_handler(self, signum, frame):
+        """ Handler for quiting signals. """
+        self.Quit(None)
+
+    def _check_for_inactivity(self):
+        """
+        Shutdown the daemon if it has been inactive for time specified
+        in IDLE_TIMEOUT.
+        """
+        log.debug("Checking for inactivity")
+        if self._worker.inactive(IDLE_TIMEOUT) \
+               and not gobject.main_context_default().pending():
+            log.info("Quiting due to inactivity")
+            self.Quit(None)
+            return False
+        return True
