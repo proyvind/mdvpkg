@@ -27,7 +27,7 @@
 import logging
 import sys
 import os
-
+from optparse import OptionParser
 
 currentdir = os.path.dirname(os.path.abspath(sys.argv[0]))
 basedir = os.path.abspath(os.path.join(currentdir, '..'))
@@ -37,13 +37,11 @@ basedir = os.path.abspath(os.path.join(currentdir, '..'))
 if os.path.exists(os.path.join(basedir, 'mdvpkg')):
     sys.path.append(basedir)
 
-# Add paulob's python directory
 sys.path.append('/usr/share/mandriva')
+import mdvpkg.daemon
+
 
 # Parse command line arguments to configure and run mdvpkgd ...
-
-import mdvpkg.daemon
-from optparse import OptionParser
 
 parser = OptionParser()
 parser.add_option('--session',
