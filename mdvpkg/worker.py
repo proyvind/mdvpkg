@@ -139,11 +139,12 @@ class TaskWorker(object):
     """ A worker for tasks.  Tasks are queued in order of addition. """
     
     def __init__(self, backend_path):
-        self._queue = collections.deque()
+        self._queue = collections.OrderedDict()
         self._backend = Backend(backend_path)
         self._thread = threading.Thread(target=self._work_loop,
                                         name='mdvpkg-worker-thread')
         self._new_task = threading.Event()
+        self._queue_lock = threading.Lock()
         self._thread.daemon = True
         self._thread.start()
         self._task = None
@@ -152,7 +153,9 @@ class TaskWorker(object):
 
     def push(self, task):
         """ Add a task to the task queue. """
-        self._queue.append(task)
+        self._queue_lock.acquire()
+        self._queue[task.path] = task
+        self._queue_lock.release()
         self._new_task.set()
 
     def inactive(self, idle_timeout):
@@ -166,19 +169,38 @@ class TaskWorker(object):
         self._new_task.set()
         self._thread.join()
 
+    def cancel(self, task):
+        if self._task == task:
+            # TODO Currently the task won't be cancelled, should we
+            #      put a flag in the for cancellation request?
+            return
+        else:
+            # Not running the task, so we remove it from the queue.
+            # It's an error if the task was not queued ...
+            self._queue_lock.acquire()
+            t = self._queue.pop(task.path, None)
+            if not t:
+                log.error('Cancelling not queued task')
+            if t != task:
+                log.error('Cancelling a task with different path')
+            self._queue_lock.release()
+
     def _work_loop(self):
         """ Worker's thread activity method. """
         log.info("Thread initialized")
         self.__work = True
         while self.__work:
             try:
-                self._task = self._queue.popleft()
-            except IndexError:
+                self._queue_lock.acquire()
+                (path, self._task) = self._queue.popitem(last=False)
+            except KeyError:
+                self._queue_lock.release()
                 if not self._new_task.wait(WAIT_TASK_TIMEOUT) \
                        and self._backend.running():
                     log.info('No tasks available, Killing backend')
                     self._backend.kill()
             else:
+                self._queue_lock.release()
                 self._new_task.clear()
                 try:
                     self._last_action_timestamp = time.time()

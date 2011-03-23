@@ -32,6 +32,7 @@ import uuid
 
 import mdvpkg
 import mdvpkg.worker
+import mdvpkg.exceptions
 
 
 # Delay before removing tasks from the bus:
@@ -51,34 +52,70 @@ class TaskBase(dbus.service.Object):
             dbus.service.BusName(mdvpkg.DBUS_SERVICE, self._bus),
             self.path
             )
-        log.info('Task created: %s, %s',
-                 self.__class__.__name__,
-                 self.path)
         self._sender = sender
         self._worker = worker
         # Passed to backend when call_backend is called ...
         self.backend_args = []
         self.backend_kwargs = {}
+        # If the task was already sent to the worker:
+        self._queued = False
+        # Watch for sender (which is a unique name) changes:
+        self._sender_watch = self._bus.watch_name_owner(
+                                     self._sender,
+                                     self._sender_owner_changed
+                                 )
+        log.info('Task created: %s, %s',
+                 self._sender,
+                 self.path)
+
+    #
+    # D-Bus Interface
+    #
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='',
                          out_signature='',
                          sender_keyword='sender')
     def Run(self, sender):
-        log.info('Run method called: %s', sender)
+        """ Run the task. """
+        log.info('Run method called: %s, %s', sender, self.path)
+        if self._queued:
+            raise mdvpkg.exceptions.TaskAlreadyRunning()
+        self._queued = True
         self._worker.push(self)
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='',
+                         out_signature='',
+                         sender_keyword='sender')
+    def Cancel(self, sender):
+        """ Cancel and remove the task. """
+        log.debug('Cancel method called: %s, %s', sender, self.path)
+        if self._queued:
+            self._worker.cancel(self)
+            self._queued = False
+        self._remove_and_cleanup()
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='')
     def Finished(self):
-        log.info('Finished signal emitted')
+        """ Signals that the task has finished successfully. """
+        log.debug('Finished signal emitted: %s, %s', sender, self.path)
         pass
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='s')
     def Error(self, msg):
-        log.info('Error signal emitted: %s', msg)
+        """ Signals a task error during running. """
+        log.debug('Error signal emitted: %s, %s (%s)',
+                  sender,
+                  self.path,
+                  msg)
         pass
+
+    #
+    # Worker Callbacks
+    #
 
     def worker_callback(self, backend):
         """ Called by the worker to perform the task. """
@@ -87,10 +124,19 @@ class TaskBase(dbus.service.Object):
     def exit_callback(self):
         """ Called by the worker when the task is finished. """
         self.Finished()
-        log.info('Task removed: %s', self.path)
-        # mall timeout so the signal can propagate:
+        self._remove_and_cleanup()
+
+    #
+    # Private and helpers
+    #
+
+    def _remove_and_cleanup(self):
+        """ Remove the task from the bus and clean up. """
+        self._sender_watch.cancel()
+        # Small timeout so the signal can propagate:
         gobject.timeout_add_seconds(TASK_DEL_TIMEOUT,
                                     self.remove_from_connection)
+        log.info('Task removed: %s', self.path)
 
     def _backend_helper(self, backend, command):
         """
@@ -105,6 +151,17 @@ class TaskBase(dbus.service.Object):
         except mdvpkg.worker.BackendDoError as msg:
             log.debug('Backend error: %s', msg)
             self.Error(msg.args[0])
+
+    def _sender_owner_changed(self, connection):
+        """ Called when the sender owner changes. """
+        # Since we are watching a unique name this will be only called
+        # when the name is acquired and when the name is released; the
+        # latter will have connection == None:
+        if not connection:
+            log.debug('Sender disconnected: %s, %s',
+                      self._sender,
+                      self.path)
+            self.Cancel(None)
 
 
 class ListMediasTask(TaskBase):
@@ -175,7 +232,7 @@ class ListPackagesTask(TaskBase):
         log.info('FilterStatus() called: %s', filter)
         if not re.match('~?(new|upgrade|local)', filter):
             self.Error('Unknow status filter: %s' % filter)
-            self.exit_callback()
+            self._remove_and_cleanup()
         else:
             self.backend_args.append(filter)
 
