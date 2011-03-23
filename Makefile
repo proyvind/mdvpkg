@@ -1,17 +1,31 @@
 NAME = mdvpkg
 VERSION = $(shell python -c 'import mdvpkg; print mdvpkg.__version__')
-SRCDIR = $(NAME)-$(VERSION)
-DISTDIR = dist
-TARBALL = $(DISTDIR)/$(SRCDIR).tar.bz2
+TARBALL = $(NAME)-$(VERSION).tar.bz2
+
+ROOT = ''
+
+DATA_DIR = $(ROOT)$(shell python -c 'import mdvpkg; '\
+                                    'print mdvpkg.DEFAULT_DATA_DIR')
+SBIN_DIR = $(ROOT)/usr/sbin/
+DBUS_DATA_DIR = $(ROOT)/usr/share/dbus-1/system-services/
+DBUS_CONF_DIR = $(ROOT)/etc/dbus-1/system.d/
 
 
-.PHONY: all release clean
+.PHONY: $(TARBALL) install clean 
 
-all: $(TARBALL)
 $(TARBALL):
-	@echo 'Creating tarball' $(TARBALL)
-	@mkdir -p $(DISTDIR)/
-	@git archive --prefix=$(SRCDIR)/ --format=tar HEAD | bzip2 > $(TARBALL)
+	@git archive --prefix=$(NAME)-$(VERSION)/ \
+	    --format=tar HEAD | bzip2 > $(TARBALL)
+	@echo Created tarball: $(TARBALL) $(PREFIX)
+
+install:
+	install -d $(DATA_DIR) $(SBIN_DIR) \
+                        $(DBUS_DATA_DIR) $(DBUS_CONF_DIR) 
+	cp -R mdvpkg/ $(DATA_DIR)/
+	cp -R backend/ $(DATA_DIR)/
+	install -m755 bin/mdvpkgd $(SBIN_DIR)
+	install -m644 dbus/*.conf $(DBUS_CONF_DIR)
+	install -m644 dbus/*.service $(DBUS_DATA_DIR)
 
 clean:
-	[ -d $(DISTDIR) ] && rm -r $(DISTDIR)
+	rm -r $(TARBALL)

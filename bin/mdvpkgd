@@ -37,7 +37,8 @@ basedir = os.path.abspath(os.path.join(currentdir, '..'))
 if os.path.exists(os.path.join(basedir, 'mdvpkg')):
     sys.path.append(basedir)
 
-sys.path.append('/usr/share/mandriva')
+# mdvpkg python's path
+sys.path.append('/usr/share/mandriva/mdvpkg/')
 import mdvpkg.daemon
 
 
