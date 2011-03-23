@@ -5,7 +5,7 @@ TARBALL = $(NAME)-$(VERSION).tar.bz2
 ROOT = ''
 
 DATA_DIR = $(ROOT)$(shell python -c 'import mdvpkg; print mdvpkg.DEFAULT_DATA_DIR')/
-DOC_DIR = $(ROOT)/usr/share/doc/mandriva/
+DOC_DIR = $(ROOT)/usr/share/doc/mandriva/$(NAME)
 SBIN_DIR = $(ROOT)/usr/sbin/
 DBUS_DATA_DIR = $(ROOT)/usr/share/dbus-1/system-services/
 DBUS_CONF_DIR = $(ROOT)/etc/dbus-1/system.d/
