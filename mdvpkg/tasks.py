@@ -100,15 +100,14 @@ class TaskBase(dbus.service.Object):
                          signature='')
     def Finished(self):
         """ Signals that the task has finished successfully. """
-        log.debug('Finished signal emitted: %s, %s', sender, self.path)
+        log.debug('Finished signal emitted: %s', self.path)
         pass
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='s')
     def Error(self, msg):
         """ Signals a task error during running. """
-        log.debug('Error signal emitted: %s, %s (%s)',
-                  sender,
+        log.debug('Error signal emitted: %s (%s)',
                   self.path,
                   msg)
         pass
