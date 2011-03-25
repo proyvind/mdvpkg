@@ -39,6 +39,7 @@ binmode STDOUT, ':encoding(utf8)';
 binmode STDIN, ':encoding(utf8)';
 
 my $urpm = urpm->new_parse_cmdline;
+$urpm->{error} = sub {};
 
 my $db;                        # URPM db, initially not opened
 
@@ -264,7 +265,7 @@ sub get_status {
 	return 'local';
     }
 
-    if ($pkg->flag_upgrade and $pkg->flag_upgrade) {
+    if ($pkg->flag_installed and $pkg->flag_upgrade) {
 	return 'upgrade';
     }
 
@@ -290,30 +291,10 @@ sub filter_package {
 	$pkg->group eq $filter or return 0;
     }
 
-    if (exists $filters{'local'}) {
-	if ($filters{'local'}) {
-	    $pkg->flag_installed && !$pkg->flag_upgrade or return 0;
-	}
-	else {
-	    $pkg->flag_upgrade or return 0;
-	}
-    }
-
-    if (exists $filters{'upgrade'}) {
-	if ($filters{'upgrade'}) {
-	    $pkg->flag_upgrade && $pkg->flag_installed or return 0;
-	}
-	else {
-	    not $pkg->flag_upgrade || not $pkg->flag_installed or return 0;
-	}
-    }
-
-    if (exists $filters{'new'}) {
-	if ($filters{'new'}) {
-	    $pkg->flag_upgrade && !$pkg->flag_installed or return 0;
-	}
-	else {
-	    $pkg->flag_installed or return 0;
+    foreach ( qw(local upgrade new) ) {
+	if (exists $filters{$_}) {
+	    my $status = get_status($pkg);
+	    return 0 if ($filters{$_} ? $status ne $_ : $status eq $_);
 	}
     }
 
