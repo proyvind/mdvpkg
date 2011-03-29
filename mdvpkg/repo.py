@@ -56,12 +56,12 @@ class Media:
         #       'm' for 'mdv' (our currently disttag).
 
         self._nvra_re = re.compile('^(?P<name>.+)-'
-                                   '(?P<version>[^-]+)-'
-                                   '(?P<release>[^m].*)\.'
-                                   '(?P<arch>.+)$')
+                                       '(?P<version>[^-]+)-'
+                                       '(?P<release>[^m].*)\.'
+                                       '(?P<arch>.+)$')
         self._cap_re = re.compile('^(?P<name>[^[]+)'
-                                  '(?:\[\*])*(?:\[(?P<cond>[<>=]*)'
-                                  ' *(?P<ver>.*)])?')
+                                      '(?:\[\*])*(?:\[(?P<cond>[<>=]*)'
+                                      ' *(?P<ver>.*)])?')
 
     def list(self):
         """
