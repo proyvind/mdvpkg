@@ -30,6 +30,8 @@ import subprocess
 import threading
 import collections
 
+import mdvpkg.repo
+
 
 WAIT_TASK_TIMEOUT = 15
 gobject.threads_init()
@@ -146,10 +148,15 @@ class TaskWorker(object):
         self._new_task = threading.Event()
         self._queue_lock = threading.Lock()
         self._thread.daemon = True
+        log.debug('Loading urpmi db')
+        self.urpmi = mdvpkg.repo.URPMI()
+        self.urpmi.load_db()
+        log.debug('urpmi db loaded')
         self._thread.start()
         self._task = None
         self._last_action_timestamp = time.time()
         self._backend.run()
+
 
     def push(self, task):
         """ Add a task to the task queue. """
@@ -203,7 +210,7 @@ class TaskWorker(object):
                     log.debug('Got a task: %s', self._task.path)
                     if not self._backend.running():
                         self._backend.run()
-                    self._task.worker_callback(self._backend)
+                    self._task.worker_callback(self.urpmi, self._backend)
                     self._task.exit_callback()
                     self._task = None
                 except Exception as e:

@@ -116,7 +116,7 @@ class TaskBase(dbus.service.Object):
     # Worker Callbacks
     #
 
-    def worker_callback(self, backend):
+    def worker_callback(self, urpmi, backend):
         """ Called by the worker to perform the task. """
         raise NotImplementedError()
 
@@ -172,9 +172,9 @@ class ListMediasTask(TaskBase):
         log.debug('Media signal emitted: %s', media_name)
         pass
 
-    def worker_callback(self, backend):
-        for media in self._backend_helper(backend, 'list_medias'):
-            self.Media(*media)
+    def worker_callback(self, urpmi, backend):
+        for media in urpmi.medias.values():
+            self.Media(media.name, media.update, media.ignore)
 
 
 class ListGroupsTask(TaskBase):
@@ -186,7 +186,7 @@ class ListGroupsTask(TaskBase):
         log.debug('Group signal emitted: %s', group)
         pass
 
-    def worker_callback(self, backend):
+    def worker_callback(self, urpmi, backend):
         for group in self._backend_helper(backend, 'list_groups'):
             self.Group(*group)
 
@@ -195,9 +195,9 @@ class ListPackagesTask(TaskBase):
     """ List all available packages. """
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='a{ss}sssst')
-    def Package(self, name, epoch, status, group, summary, size):
-        log.debug('Package signal emitted: %s', name)
+                         signature='(ssss)ss')
+    def Package(self, nvra, media, status):
+        log.debug('Package signal emitted: %s', nvra)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='s',
@@ -235,14 +235,27 @@ class ListPackagesTask(TaskBase):
         else:
             self.backend_args.append(filter)
 
-    def worker_callback(self, backend):
-        for pkg in self._backend_helper(backend, 'list_packages'):
-            epoch = pkg.pop('epoch')
-            group = pkg.pop('group')
-            summary = pkg.pop('summary')
-            status = pkg.pop('status')
-            size = pkg.pop('size')
-            self.Package(pkg, epoch, status, group, summary, size)
+    def _get_latest(self, entry):
+        pkg_desc = sorted(entry.values())[-1]
+        return (pkg_desc['pkg'], pkg_desc['media'])
+
+    def worker_callback(self, urpmi, backend):
+        for entry in urpmi._cache.values():
+            if entry['new']:
+                status = 'new'
+                (pkg, media) = self._get_latest(entry['new'])
+            elif entry['upgrade']:
+                status = 'upgrade'
+                (pkg, media) = self._get_latest(entry['upgrade'])
+            else:
+                (pkg, media) = self._get_latest(entry['current'])
+                if media:
+                    status = 'installed'
+                else:
+                    status = 'local'
+            self.Package((pkg.name, pkg.version, pkg.release, pkg.arch),
+                         media,
+                         status)
 
 
 class PackageDetailsTask(TaskBase):
@@ -258,7 +271,7 @@ class PackageDetailsTask(TaskBase):
         log.debug('PackageDetails signal emitted: %s', name)
         pass
 
-    def worker_callback(self, backend):
+    def worker_callback(self, urpmi, backend):
         for pkg in self._backend_helper(backend, 'package_details'):
             media = pkg.pop('media')
             installtime = pkg.pop('installtime')
@@ -287,7 +300,7 @@ class SearchFilesTask(TaskBase):
         """ Match file names using a regex. """
         self.args.append('fuzzy')
 
-    def worker_callback(self, backend):
+    def worker_callback(self, urpmi, backend):
         for r in self._backend_helper(backend, 'search_files'):
             self.PackageFiles(r['name'], r['version'], r['release'],
                                   r['arch'], r['files'])
