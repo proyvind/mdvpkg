@@ -19,19 +19,9 @@
 ##
 ## Author(s): J. Victor Martins <jvdm@mandriva.com>
 ##
+""" RPM utilities functions. """
 
-__author__  = "J. Victor Martins <jvdm@mandriva.com>"
-__state__   = "development"
-__version__ = "0.4.10"
 
-DBUS_SERVICE = 'org.mandrivalinux.mdvpkg'
-DBUS_INTERFACE = 'org.mandrivalinux.mdvpkg'
-DBUS_PATH = '/'
-
-DBUS_TASK_PATH = '%stask' % DBUS_PATH
-DBUS_TASK_INTERFACE = '%s.task' % DBUS_INTERFACE
-
-MANDRIVA_DATA_DIR = '/usr/share/mandriva'
-DEFAULT_DATA_DIR = '%s/mdvpkg' % MANDRIVA_DATA_DIR
-DEFAULT_BACKEND_DIR = '%s/backend' % DEFAULT_DATA_DIR
-DEFAULT_BACKEND_PATH = '%s/urpmi_backend.pl' % DEFAULT_BACKEND_DIR
+import sys
+sys.path.append('%s/%s/mandriva/mdvpkg' % (sys.prefix, sys.lib))
+from _rpmutils import *
