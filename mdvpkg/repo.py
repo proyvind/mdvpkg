@@ -148,12 +148,12 @@ class RpmPackage(object):
         """
         return (self.name, self.arch)
 
-    def evr(self):
+    def vr(self):
         """
-        Package Epoch-Version-Release: identifies a specific package
+        Package Version-Release: identifies a specific package
         version.
         """
-        return (self.epoch, self.version, self.release)
+        return (self.version, self.release)
 
     def nvra(self):
         """
@@ -207,6 +207,7 @@ class URPMI(object):
     def __init__(self):
         self._medias = None
         self._cache = {}
+        self._groups = set()
 
     @property
     def medias(self):
@@ -242,6 +243,10 @@ class URPMI(object):
             for pkg_data in media.list():
                 pkg = RpmPackage(**pkg_data)
                 self._load_pkg_from_media(pkg, media.name)
+                self._add_group(pkg.group)
+
+    def _add_group(self, group):
+        self._groups.add(group)
 
     def _load_installed(self):
         """ Populate installed cache with package in local rpm db. """
@@ -259,18 +264,19 @@ class URPMI(object):
 
             name = pkg.na()
             entry = self._get_or_create_cache_entry(name)
-            version = pkg.evr()
+            version = pkg.vr()
 
             assert version not in entry['current'], \
                 'installed pkg with same version: %s' % pkg
             desc = self._create_pkg_desc(pkg,
                                          installtime=installtime)
             entry['current'][version] = desc
+            self._add_group(pkg.group)
         rpm.wait()
 
     def _load_pkg_from_media(self, pkg, media_name):
         name = pkg.na()
-        version = pkg.evr()
+        version = pkg.vr()
         entry = self._get_or_create_cache_entry(name)
         if entry['current']:
             current = entry['current']
