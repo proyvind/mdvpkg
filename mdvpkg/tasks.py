@@ -23,7 +23,6 @@
 
 
 import logging
-import re
 import gobject
 import dbus
 import dbus.service
@@ -181,101 +180,140 @@ class ListGroupsTask(TaskBase):
     """ List all available groups. """
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='si')
-    def Group(self, group, pkg_count):
+                         signature='s')
+    def Group(self, group):
         log.debug('Group signal emitted: %s', group)
         pass
 
     def worker_callback(self, urpmi, backend):
-        for group in self._backend_helper(backend, 'list_groups'):
-            self.Group(*group)
+        for group in urpmi._groups:
+            self.Group(group)
 
 
 class ListPackagesTask(TaskBase):
     """ List all available packages. """
 
+    def __init__(self, *args):
+        TaskBase.__init__(self, *args)
+        self.filters = {}
+
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='(ssss)ss')
-    def Package(self, nvra, media, status):
+    def Package(self, nvra, versions, status):
         log.debug('Package signal emitted: %s', nvra)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
-                         in_signature='s',
+                         in_signature='asb',
                          out_signature='',
                          sender_keyword='sender')
-    def FilterName(self, name, sender):
-        log.info('FilterName() called: %s', name)
-        self.backend_kwargs['name'] = name
+    def FilterName(self, names, exclude, sender):
+        log.info('FilterName() called: %s', names)
+        self._add_filter('name', exclude, names)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
-                         in_signature='s',
+                         in_signature='asb',
                          out_signature='',
                          sender_keyword='sender')
-    def FilterMedia(self, media, sender):
-        log.info('FilterMedia() called: %s', media)
-        self.backend_kwargs['media'] = media
+    def FilterMedia(self, medias, exclude, sender):
+        log.info('FilterMedia() called: %s', medias)
+        self._add_filter('media', exclude, medias)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
-                         in_signature='s',
+                         in_signature='asb',
                          out_signature='',
                          sender_keyword='sender')
-    def FilterGroup(self, group, sender):
-        log.info('FilterGroup() called: %s', group)
-        self.backend_kwargs['group'] = group
+    def FilterGroup(self, groups, exclude, sender):
+        log.info('FilterGroup() called: %s', groups)
+        self._add_filter('group', exclude, groups)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
-                         in_signature='s',
+                         in_signature='asb',
                          out_signature='',
                          sender_keyword='sender')
-    def FilterStatus(self, filter, sender):
-        log.info('FilterStatus() called: %s', filter)
-        if not re.match('~?(new|upgrade|local)', filter):
-            self.Error('Unknow status filter: %s' % filter)
-            self._remove_and_cleanup()
-        else:
-            self.backend_args.append(filter)
+    def FilterStatus(self, statuses, exclude, sender):
+        log.info('FilterStatus() called: %s', statuses)
+        self._add_filter('status', exclude, statuses)
 
     def _get_latest(self, entry):
         pkg_desc = sorted(entry.values())[-1]
         return (pkg_desc['pkg'], pkg_desc['media'])
 
+    def _add_filter(self, name, exclude, terms):
+        """ Add a filter to the filters set list. """
+        filter_sets = self.filters.get(name, {True: set(), False: set()})
+        if name not in self.filters:
+            self.filters[name] = filter_sets
+        filter_sets[exclude].update(terms)
+
+    def _data_pass_filters(self, **kwargs):
+        """ 
+        Get, for each filter, a candidate value from kwargs (keyed by
+        filter name) and returns if the value pass the filter.
+        Candidates values passes according to their presence in the
+        filter's sets (True -> exclude set, False -> include set).
+        """
+        for (filter_name, filter_sets) in self.filters.items():
+            candidate = kwargs.get(filter_name)
+            if candidate is None:
+                raise KeyError, \
+                    "Missing candidate for filter '%s'" % filter_name
+            for (exclude, _set) in filter_sets.items():
+                if _set and exclude ^ (candidate not in _set):
+                        return False
+        return True
+
     def worker_callback(self, urpmi, backend):
         for entry in urpmi._cache.values():
-            if entry['new']:
-                status = 'new'
-                (pkg, media) = self._get_latest(entry['new'])
-            elif entry['upgrade']:
-                status = 'upgrade'
-                (pkg, media) = self._get_latest(entry['upgrade'])
-            else:
-                (pkg, media) = self._get_latest(entry['current'])
-                if media:
-                    status = 'installed'
-                else:
-                    status = 'local'
-            self.Package((pkg.name, pkg.version, pkg.release, pkg.arch),
-                         media,
-                         status)
+            for status in ('new', 'upgrade', 'current'):
+                desc = entry.get(status)
+                if desc:
+                    break
+            for (pkg, media) in [(d['pkg'], d['media'])
+                                 for d in desc.values()]:
+                if self._data_pass_filters(name=pkg.name,
+                                           group=pkg.group,
+                                           media=media, 
+                                           status=status):
+                    self.Package((pkg.name, pkg.version, 
+                                      pkg.release, pkg.arch),
+                                 media,
+                                 status)
 
 
 class PackageDetailsTask(TaskBase):
     """ Query for details of a package. """
 
-    def __init__(self, bus, sender, worker, name):
+    def __init__(self, bus, sender, worker, nvra):
         TaskBase.__init__(self, bus, sender, worker)
-        self.backend_kwargs['name'] = name
+        self._id = (nvra[0], nvra[3])
+        self._fullversion = (nvra[1], nvra[2])
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='a{ss}st')
-    def PackageDetails(self, name, media, installtime):
-        log.debug('PackageDetails signal emitted: %s', name)
+                         signature='(ssss)sstt')
+    def PackageDetails(self, nvra, group, summary, size, installtime):
+        log.debug('PackageDetails signal emitted: %s', nvra)
         pass
 
     def worker_callback(self, urpmi, backend):
-        for pkg in self._backend_helper(backend, 'package_details'):
-            media = pkg.pop('media')
-            installtime = pkg.pop('installtime')
-            self.PackageDetails(pkg, media, installtime)
+        try:
+            for status in urpmi._cache[self._id].values():
+                desc = status.get(self._fullversion)
+                if desc:
+                    pkg = desc['pkg']
+                    installtime = desc.get('installtime', 0)
+                    self.PackageDetails(pkg.nvra(),
+                                        pkg.group,
+                                        pkg.summary,
+                                        pkg.size,
+                                        installtime)
+                    # Assuming that the are no more package versions
+                    # in another status:
+                    return
+        except IndexError:
+            self.Error('Unknow package (name, arch): %s' 
+                       % self._id)
+        self.Error('Unknow package version for %s: %s' 
+                   % (self._id, self._fullversion))
 
 
 class SearchFilesTask(TaskBase):
