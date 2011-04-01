@@ -40,6 +40,7 @@ class DifferentUserError(DaemonError):
 
     _dbus_error_name = "org.mandrivalinux.mdvpkg.DifferentUserError"
 
+
 class TaskAlreadyRunning(DaemonError):
 
-    _debus_error_name = "org.mandrivalinux.mdvpkg.TaskAlreadyRunning"
+    _dbus_error_name = "org.mandrivalinux.mdvpkg.TaskAlreadyRunning"
