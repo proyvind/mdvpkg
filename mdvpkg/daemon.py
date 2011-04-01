@@ -135,14 +135,15 @@ class MDVPKGDaemon(dbus.service.Object):
                                  sender)
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
-                         in_signature='s',
+                         in_signature='ssss',
                          out_signature='s',
                          sender_keyword='sender')
-    def PackageDetails(self, name, sender):
+    def PackageDetails(self, name, version, release, arch, sender):
         log.info('PackageDetails() called: %s', name)
         return self._create_task(mdvpkg.tasks.PackageDetailsTask,
                                  sender,
-                                 name)
+                                 ( str(name), str(version), 
+                                       str(release), str(arch) ))
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='as',
