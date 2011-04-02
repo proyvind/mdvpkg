@@ -198,13 +198,14 @@ class TaskWorker(object):
             try:
                 with self._queue_lock:
                     (path, self._task) = self._queue.popitem(last=False)
+                    if len(self._queue) == 0:
+                        self._new_task.clear()                        
             except KeyError:
                 if not self._new_task.wait(WAIT_TASK_TIMEOUT) \
                        and self._backend.running():
                     log.info('No tasks available, Killing backend')
                     self._backend.kill()
             else:
-                self._new_task.clear()
                 try:
                     self._last_action_timestamp = time.time()
                     log.debug('Got a task: %s', self._task.path)
