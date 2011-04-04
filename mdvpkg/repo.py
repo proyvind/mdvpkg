@@ -142,12 +142,7 @@ class RpmPackage(object):
         self.conflict = conflict
         self.obsoletes = obsoletes
 
-    def na(self):
-        """
-        Package Name-Arch: identifies uniquely the software packaged.
-        """
-        return (self.name, self.arch)
-
+    @property
     def vr(self):
         """
         Package Version-Release: identifies a specific package
@@ -155,6 +150,7 @@ class RpmPackage(object):
         """
         return (self.version, self.release)
 
+    @property
     def nvra(self):
         """
         Package Name-Version-Release-Arch: identifies uniquely the
@@ -163,7 +159,7 @@ class RpmPackage(object):
         return (self.name, self.version, self.release, self.arch)
 
     def __eq__(self, other):
-        return self.nvra() == other.nvra()
+        return self.nvra == other.nvra
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -178,9 +174,9 @@ class RpmPackage(object):
         return self.__le__(other)
 
     def __cmp__(self, other):
-        if self.na() != other.na():
-            raise ValueError('Name-arch mismatch %s != %s'
-                             % (self.na(), other.na()))
+        if self.name != other.name:
+            raise ValueError('Name mismatch %s != %s'
+                             % (self.name, other.name))
         if self.epoch > other.epoch:
             return 1;
         elif self.epoch < other.epoch:
@@ -191,7 +187,7 @@ class RpmPackage(object):
         return cmp
 
     def __str__(self):
-        return '%s-%s-%s.%s' % self.nvra()
+        return '%s-%s-%s.%s' % self.nvra
 
     def __repr__(self):
         return '%s(%s:%s)' % (self.__class__.__name__,
@@ -207,7 +203,7 @@ class URPMI(object):
     def __init__(self):
         self._medias = None
         self._cache = {}
-        self._groups = set()
+        self._groups = {}
 
     @property
     def medias(self):
@@ -229,13 +225,6 @@ class URPMI(object):
         if not self._cache:
             self.load_db()
 
-    def search_name(self, n):
-        result = []
-        for name, arch in self._cache:
-            if n == name:
-                result.append((name, arch))
-        return result
-
     def load_db(self):
         self._cache = {}
         self._load_installed()
@@ -246,7 +235,10 @@ class URPMI(object):
                 self._add_group(pkg.group)
 
     def _add_group(self, group):
-        self._groups.add(group)
+        if group not in self._groups:
+            self._groups[group] = 1
+        else:
+            self._groups[group] += 1
 
     def _load_installed(self):
         """ Populate installed cache with package in local rpm db. """
@@ -262,9 +254,8 @@ class URPMI(object):
             pkg = RpmPackage(*fields[:-1])
             installtime = int(fields[-1])
 
-            name = pkg.na()
-            entry = self._get_or_create_cache_entry(name)
-            version = pkg.vr()
+            entry = self._get_or_create_cache_entry(pkg.name)
+            version = pkg.vr
 
             assert version not in entry['current'], \
                 'installed pkg with same version: %s' % pkg
@@ -275,9 +266,8 @@ class URPMI(object):
         rpm.wait()
 
     def _load_pkg_from_media(self, pkg, media_name):
-        name = pkg.na()
-        version = pkg.vr()
-        entry = self._get_or_create_cache_entry(name)
+        version = pkg.vr
+        entry = self._get_or_create_cache_entry(pkg.name)
         if entry['current']:
             current = entry['current']
             if version in current:
