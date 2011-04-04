@@ -309,7 +309,7 @@ class URPMI(object):
                 current[version]['media'] = media_name
             else:
                 desc = self._create_pkg_desc(pkg, media_name)
-                installed_pkgs = [v['pkg'] for v in current.values()]
+                installed_pkgs = [v['rpm'] for v in current.values()]
                 recent_pkg = sorted(installed_pkgs)[-1]
                 if pkg > recent_pkg:
                     entry['upgrade'][version] = desc
@@ -330,7 +330,7 @@ class URPMI(object):
         return entry
 
     def _create_pkg_desc(self, pkg, media='', installtime=None):
-        desc = {'pkg': pkg, 'media': media}
+        desc = {'rpm': pkg, 'media': media}
         if installtime:
             desc['installtime'] = installtime
         return desc
