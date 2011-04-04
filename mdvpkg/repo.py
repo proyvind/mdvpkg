@@ -195,6 +195,40 @@ class RpmPackage(object):
                               self.epoch)
 
 
+class UrpmiPackage(object):
+    def __init__(self,
+                 urpmi,
+                 name):
+        self._urpmi = urpmi
+        self.name = name
+
+    @property
+    def status(self):
+        if self._urpmi._cache[self.name]['new']:
+            return 'new'
+        else:
+            return 'current'
+
+    @property
+    def upgrades(self):
+        if self.status == 'new':
+            raise AttributeError, "UrpmiPackage status == 'new'"
+        return self._installed_updates('upgrade')
+
+    @property
+    def downgrades(self):
+        if self.status == 'new':
+            raise AttributeError, "UrpmiPackage status == 'new'"
+        return self._installed_updates('downgrade')
+
+    @property
+    def versions(self):
+        return self._urpmi._cache[self.name][self.status].values()
+
+    def _installed_updates(self, update_type):
+        return self._urpmi._cache[self.name][update_type].values()
+
+
 class URPMI(object):
     """ Represents a urpmi database. """
 
@@ -219,11 +253,12 @@ class URPMI(object):
     def medias(self):
         self._medias = None
 
-
     @property
     def packages(self):
         if not self._cache:
             self.load_db()
+        for name in self._cache.keys():
+            yield UrpmiPackage(self, name)
 
     def load_db(self):
         self._cache = {}
