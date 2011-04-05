@@ -328,7 +328,7 @@ class ListPackagesTask(TaskBase):
                 self.Package(
                     (rpm.name, rpm.version, rpm.release, rpm.arch),
                     (p.status,
-                     version['media'],
+                     media,
                      rpm.group,
                      rpm.summary,
                      rpm.size,
