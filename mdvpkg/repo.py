@@ -24,10 +24,9 @@
 
 
 import re
-import gzip
 import collections
 import subprocess
-
+import gzip
 import mdvpkg.rpmutils
 
 
@@ -42,7 +41,6 @@ class Media:
         self.update = update
         self.key = key
         if compressed:
-            import gzip
             self._open = gzip.open
         else:
             self._open = open
@@ -93,18 +91,18 @@ class Media:
         package name.  Handle both names with and without
         {release}-{disttag}{distepoch}.
         """
-        m = self._nvra_re.match(name)
-        if not m:
+        match = self._nvra_re.match(name)
+        if not match:
             raise ValueError, 'Malformed RPM name: %s' % name
 
-        release = m.group('release')
+        release = match.group('release')
         if release.find('-') != -1:
             release = release.split('-')[0]
 
-        return (m.group('name'),
-                m.group('version'),
+        return (match.group('name'),
+                match.group('version'),
                 release,
-                m.group('arch'))
+                match.group('arch'))
 
     def _parse_capability_list(self, cap_str_list):
         """
@@ -178,9 +176,9 @@ class RpmPackage(object):
             raise ValueError('Name mismatch %s != %s'
                              % (self.name, other.name))
         if self.epoch > other.epoch:
-            return 1;
+            return 1
         elif self.epoch < other.epoch:
-            return -1;
+            return -1
         cmp = mdvpkg.rpmutils.rpmvercmp(self.version, other.version)
         if cmp == 0:
             cmp = mdvpkg.rpmutils.rpmvercmp(self.release, other.release)
@@ -204,6 +202,7 @@ class UrpmiPackage(object):
 
     @property
     def status(self):
+        """ Package status: 'new' or 'current'. """
         if self._urpmi._cache[self.name]['new']:
             return 'new'
         else:
@@ -211,14 +210,10 @@ class UrpmiPackage(object):
 
     @property
     def upgrades(self):
-        if self.status == 'new':
-            raise AttributeError, "UrpmiPackage status == 'new'"
         return self._installed_updates('upgrade')
 
     @property
     def downgrades(self):
-        if self.status == 'new':
-            raise AttributeError, "UrpmiPackage status == 'new'"
         return self._installed_updates('downgrade')
 
     @property
