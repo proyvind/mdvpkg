@@ -63,9 +63,7 @@ class TaskBase(dbus.service.Object):
                                      self._sender,
                                      self._sender_owner_changed
                                  )
-        log.info('Task created: %s, %s',
-                 self._sender,
-                 self.path)
+        log.debug('Task created: %s, %s', self._sender, self.path)
 
     #
     # D-Bus Interface
@@ -77,7 +75,7 @@ class TaskBase(dbus.service.Object):
                          sender_keyword='sender')
     def Run(self, sender):
         """ Run the task. """
-        log.info('Run method called: %s, %s', sender, self.path)
+        log.debug('Run method called: %s, %s', sender, self.path)
         if self._queued:
             raise mdvpkg.exceptions.TaskAlreadyRunning()
         self._queued = True
@@ -134,7 +132,7 @@ class TaskBase(dbus.service.Object):
         # Small timeout so the signal can propagate:
         gobject.timeout_add_seconds(TASK_DEL_TIMEOUT,
                                     self.remove_from_connection)
-        log.info('Task removed: %s', self.path)
+        log.debug('Task removed: %s', self.path)
 
     def _backend_helper(self, backend, command):
         """
@@ -180,14 +178,13 @@ class ListGroupsTask(TaskBase):
     """ List all available groups. """
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='s')
-    def Group(self, group):
+                         signature='st')
+    def Group(self, group, count):
         log.debug('Group signal emitted: %s', group)
-        pass
 
     def worker_callback(self, urpmi, backend):
-        for group in urpmi._groups:
-            self.Group(group)
+        for (group, count) in urpmi.groups.items():
+            self.Group(group, count)
 
 
 class ListPackagesTask(TaskBase):
@@ -195,11 +192,19 @@ class ListPackagesTask(TaskBase):
 
     def __init__(self, *args):
         TaskBase.__init__(self, *args)
-        self.filters = {}
+        self.filters = {'name': {'sets': {},
+                                 'match_func': self._match_name},
+                        'media': {'sets': {},
+                                  'match_func': self._match_media},
+                        'group': {'sets': {},
+                                  'match_func': self._match_group},
+                        'status': {'sets': {},
+                                   'match_func': self._match_status},}
+        self.details = []
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='(ssss)ss')
-    def Package(self, nvra, versions, status):
+                         signature='(ssss)(sssstt)bb')
+    def Package(self, nvra, details, upgrades, downgrades):
         log.debug('Package signal emitted: %s', nvra)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -207,77 +212,130 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterName(self, names, exclude, sender):
-        log.info('FilterName() called: %s', names)
-        self._add_filter('name', exclude, names)
+        log.debug('FilterName() called: %s', names)
+        self._append_or_create_filter('name', exclude, names)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='asb',
                          out_signature='',
                          sender_keyword='sender')
     def FilterMedia(self, medias, exclude, sender):
-        log.info('FilterMedia() called: %s', medias)
-        self._add_filter('media', exclude, medias)
+        log.debug('FilterMedia() called: %s', medias)
+        self._append_or_create_filter('media', exclude, medias)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='asb',
                          out_signature='',
                          sender_keyword='sender')
     def FilterGroup(self, groups, exclude, sender):
-        log.info('FilterGroup() called: %s', groups)
-        self._add_filter('group', exclude, groups)
+        log.debug('FilterGroup() called: %s', groups)
+        self._append_or_create_filter('group', exclude, groups)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
-                         in_signature='asb',
+                         in_signature='b',
                          out_signature='',
                          sender_keyword='sender')
-    def FilterStatus(self, statuses, exclude, sender):
-        log.info('FilterStatus() called: %s', statuses)
-        self._add_filter('status', exclude, statuses)
+    def FilterUpgrade(self, exclude, sender):
+        log.debug('FilterStatus() called: %s', exclude)
+        self._append_or_create_filter('status', exclude, ['upgrade'])
 
-    def _get_latest(self, entry):
-        pkg_desc = sorted(entry.values())[-1]
-        return (pkg_desc['pkg'], pkg_desc['media'])
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='b',
+                         out_signature='',
+                         sender_keyword='sender')
+    def FilterDowngrade(self, exclude, sender):
+        log.debug('FilterStatus() called: %s', exclude)
+        self._append_or_create_filter('status', exclude, ['downgrade'])
 
-    def _add_filter(self, name, exclude, terms):
-        """ Add a filter to the filters set list. """
-        filter_sets = self.filters.get(name, {True: set(), False: set()})
-        if name not in self.filters:
-            self.filters[name] = filter_sets
-        filter_sets[exclude].update(terms)
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='b',
+                         out_signature='',
+                         sender_keyword='sender')
+    def FilterNew(self, exclude, sender):
+        log.debug('FilterStatus() called: %s', exclude)
+        self._append_or_create_filter('status', exclude, ['new'])
 
-    def _data_pass_filters(self, **kwargs):
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='b',
+                         out_signature='',
+                         sender_keyword='sender')
+    def FilterInstalled(self, exclude, sender):
+        log.debug('FilterStatus() called: %s', exclude)
+        self._append_or_create_filter('status', exclude, ['current'])
+
+    def _append_or_create_filter(self, filter_name, exclude, data):
         """ 
-        Get, for each filter, a candidate value from kwargs (keyed by
-        filter name) and returns if the value pass the filter.
-        Candidates values passes according to their presence in the
-        filter's sets (True -> exclude set, False -> include set).
+        Append more data to the filter set (selected by exclude flag),
+        or create and initialize the set if it didn't existed.
         """
-        for (filter_name, filter_sets) in self.filters.items():
-            candidate = kwargs.get(filter_name)
-            if candidate is None:
-                raise KeyError, \
-                    "Missing candidate for filter '%s'" % filter_name
-            for (exclude, _set) in filter_sets.items():
-                if _set and exclude ^ (candidate not in _set):
-                        return False
-        return True
+        sets = self.filters[filter_name]['sets']
+        _set = sets.get(exclude)
+        if not _set:
+            _set = set()
+            sets[exclude] = _set
+        _set.update(data)
+
+    #
+    # Filter Callbacks
+    #
+
+    def _match_name(self, candidate, patterns):
+        for pattern in patterns:
+            if candidate.find(pattern) != -1:
+                return True
+        return False
+
+    def _match_media(self, media, medias):
+        return media in medias
+
+    def _match_group(self, group, groups):
+        folders = group.split('/')
+        for i in range(1, len(folders) + 1):
+            if '/'.join(folders[:i]) in groups:
+                return True
+        return False
+
+    def _match_status(self, pkg, statuses):
+        if 'upgrade' in statuses and pkg.upgrades:
+            return True
+        if 'downgrade' in statuses and pkg.downgrades:
+            return True
+        return pkg.status in statuses
+
+    def _is_filtered(self, candidate, filter_name):
+        """
+        Check if candidate should be filtered by the rules of filter
+        filter_name.
+        """
+        match_func = self.filters[filter_name]['match_func']
+        for (exclude, data) in self.filters[filter_name]['sets'].items():
+            if exclude ^ (not match_func(candidate, data)):
+                return True
+        return False
 
     def worker_callback(self, urpmi, backend):
-        for entry in urpmi._cache.values():
-            for status in ('new', 'upgrade', 'current'):
-                desc = entry.get(status)
-                if desc:
-                    break
-            for (pkg, media) in [(d['pkg'], d['media'])
-                                 for d in desc.values()]:
-                if self._data_pass_filters(name=pkg.name,
-                                           group=pkg.group,
-                                           media=media, 
-                                           status=status):
-                    self.Package((pkg.name, pkg.version, 
-                                      pkg.release, pkg.arch),
-                                 media,
-                                 status)
+        for p in urpmi.packages:
+            if self._is_filtered(p.name, 'name') \
+                    or self._is_filtered(p, 'status'):
+                continue
+            for version in p.versions:
+                rpm = version['rpm']
+                media = version['media']
+                if self._is_filtered(media, 'media') \
+                        or self._is_filtered(rpm.group, 'group'):
+                    continue
+                installtime = str()
+                self.Package(
+                    (rpm.name, rpm.version, rpm.release, rpm.arch),
+                    (p.status,
+                     version['media'],
+                     rpm.group,
+                     rpm.summary,
+                     rpm.size,
+                     version.get('installtime', 0)),
+                    bool(p.upgrades),
+                    bool(p.downgrades)
+                )
 
 
 class PackageDetailsTask(TaskBase):
@@ -285,36 +343,15 @@ class PackageDetailsTask(TaskBase):
 
     def __init__(self, bus, sender, worker, nvra):
         TaskBase.__init__(self, bus, sender, worker)
-        self._id = (nvra[0], nvra[3])
-        self._fullversion = (nvra[1], nvra[2])
+        self.nvra = nvra
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='(ssss)sstt')
     def PackageDetails(self, nvra, group, summary, size, installtime):
         log.debug('PackageDetails signal emitted: %s', nvra)
-        pass
 
     def worker_callback(self, urpmi, backend):
-        try:
-            for status in urpmi._cache[self._id].values():
-                desc = status.get(self._fullversion)
-                if desc:
-                    pkg = desc['pkg']
-                    installtime = desc.get('installtime', 0)
-                    self.PackageDetails(pkg.nvra(),
-                                        pkg.group,
-                                        pkg.summary,
-                                        pkg.size,
-                                        installtime)
-                    # Assuming that the are no more package versions
-                    # in another status:
-                    return
-        except IndexError:
-            self.Error('Unknow package (name, arch): %s' 
-                       % self._id)
-        self.Error('Unknow package version for %s: %s' 
-                   % (self._id, self._fullversion))
-
+        pass
 
 class SearchFilesTask(TaskBase):
     """ Query for package owning file paths. """
@@ -334,7 +371,7 @@ class SearchFilesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def SetRegex(self, regex, sender):
-        log.info('SetRegex() called: %s', regex)
+        log.debug('SetRegex() called: %s', regex)
         """ Match file names using a regex. """
         self.args.append('fuzzy')
 

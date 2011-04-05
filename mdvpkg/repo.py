@@ -232,7 +232,7 @@ class URPMI(object):
     def __init__(self):
         self._medias = None
         self._cache = {}
-        self._groups = {}
+        self.groups = {}
 
     @property
     def medias(self):
@@ -265,10 +265,10 @@ class URPMI(object):
                 self._add_group(pkg.group)
 
     def _add_group(self, group):
-        if group not in self._groups:
-            self._groups[group] = 1
+        if group not in self.groups:
+            self.groups[group] = 1
         else:
-            self._groups[group] += 1
+            self.groups[group] += 1
 
     def _load_installed(self):
         """ Populate installed cache with package in local rpm db. """
