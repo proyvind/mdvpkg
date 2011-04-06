@@ -109,7 +109,7 @@ class MDVPKGDaemon(dbus.service.Object):
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='',
-                         out_signature='s',
+                         out_signature='o',
                          sender_keyword='sender')
     def ListMedias(self, sender):
         log.info('ListMedias() called')
@@ -118,7 +118,7 @@ class MDVPKGDaemon(dbus.service.Object):
         
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='',
-                         out_signature='s',
+                         out_signature='o',
                          sender_keyword='sender')
     def ListGroups(self, sender):
         log.info('ListGroups() called')
@@ -127,7 +127,7 @@ class MDVPKGDaemon(dbus.service.Object):
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='',
-                         out_signature='s',
+                         out_signature='o',
                          sender_keyword='sender')
     def ListPackages(self, sender):
         log.info('ListPackages() called')
@@ -136,7 +136,7 @@ class MDVPKGDaemon(dbus.service.Object):
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='ssss',
-                         out_signature='s',
+                         out_signature='o',
                          sender_keyword='sender')
     def PackageDetails(self, name, version, release, arch, sender):
         log.info('PackageDetails() called: %s', name)
@@ -147,7 +147,7 @@ class MDVPKGDaemon(dbus.service.Object):
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='as',
-                         out_signature='s',
+                         out_signature='o',
                          sender_keyword='sender')
     def SearchFiles(self, files, sender):
         log.info('SearchFiles() called: %s', files)
