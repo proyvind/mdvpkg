@@ -25,22 +25,19 @@
 import dbus
 
 
-class DaemonError(dbus.DBusException):
-    """ Internal error in mdvpkg. """
+class MdvPkgError(dbus.DBusException):
+    """ Base error class for mdvpkg. """
 
-    _dbus_error_name = "org.mandrivalinux.mdvpkg"
-
-
-class UnknownTaskError(DaemonError):
-
-    _dbus_error_name = "org.mandrivalinux.mdvpkg.UnknowTaskError"
+    def __init__(self):
+        name = self.__class__.__name__
+        self._dbus_error_name = 'org.mandrivalinux.mdvpkg.%s' % name
 
 
-class DifferentUserError(DaemonError):
+class TaskAlreadyRunning(MdvPkgError):
+    """ Raised if a class is tried to be runned twice. """
 
-    _dbus_error_name = "org.mandrivalinux.mdvpkg.DifferentUserError"
 
-
-class TaskAlreadyRunning(DaemonError):
-
-    _dbus_error_name = "org.mandrivalinux.mdvpkg.TaskAlreadyRunning"
+class NotOwner(MdvPkgError):
+    """ Raised if a different sender tries to execute task 
+    methods.
+    """

@@ -75,6 +75,7 @@ class TaskBase(dbus.service.Object):
                          sender_keyword='sender')
     def Run(self, sender):
         """ Run the task. """
+        self._check_same_user(sender)
         log.debug('Run method called: %s, %s', sender, self.path)
         if self._queued:
             raise mdvpkg.exceptions.TaskAlreadyRunning()
@@ -87,11 +88,9 @@ class TaskBase(dbus.service.Object):
                          sender_keyword='sender')
     def Cancel(self, sender):
         """ Cancel and remove the task. """
+        self._check_same_user(sender)
         log.debug('Cancel method called: %s, %s', sender, self.path)
-        if self._queued:
-            self._worker.cancel(self)
-            self._queued = False
-        self._remove_and_cleanup()
+        self._cancel()
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='')
@@ -126,6 +125,12 @@ class TaskBase(dbus.service.Object):
     # Private and helpers
     #
 
+    def _cancel(self):
+        if self._queued:
+            self._worker.cancel(self)
+            self._queued = False
+        self._remove_and_cleanup()
+
     def _remove_and_cleanup(self):
         """ Remove the task from the bus and clean up. """
         self._sender_watch.cancel()
@@ -157,7 +162,12 @@ class TaskBase(dbus.service.Object):
             log.debug('Sender disconnected: %s, %s',
                       self._sender,
                       self.path)
-            self.Cancel(None)
+            self._cancel()
+
+    def _check_same_user(self, sender):
+        """ Check if the sender is the same that created the task. """
+        if self._sender != sender:
+            raise mdvpkg.exceptions.NotOwner()
 
 
 class ListMediasTask(TaskBase):
@@ -212,6 +222,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterName(self, names, exclude, sender):
+        self._check_same_user(sender)
         log.debug('FilterName() called: %s', names)
         self._append_or_create_filter('name', exclude, names)
 
@@ -220,6 +231,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterMedia(self, medias, exclude, sender):
+        self._check_same_user(sender)
         log.debug('FilterMedia() called: %s', medias)
         self._append_or_create_filter('media', exclude, medias)
 
@@ -228,6 +240,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterGroup(self, groups, exclude, sender):
+        self._check_same_user(sender)
         log.debug('FilterGroup() called: %s', groups)
         self._append_or_create_filter('group', exclude, groups)
 
@@ -236,6 +249,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterUpgrade(self, exclude, sender):
+        self._check_same_user(sender)
         log.debug('FilterStatus() called: %s', exclude)
         self._append_or_create_filter('status', exclude, ['upgrade'])
 
@@ -244,6 +258,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterDowngrade(self, exclude, sender):
+        self._check_same_user(sender)
         log.debug('FilterStatus() called: %s', exclude)
         self._append_or_create_filter('status', exclude, ['downgrade'])
 
@@ -252,6 +267,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterNew(self, exclude, sender):
+        self._check_same_user(sender)
         log.debug('FilterStatus() called: %s', exclude)
         self._append_or_create_filter('status', exclude, ['new'])
 
@@ -260,6 +276,7 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterInstalled(self, exclude, sender):
+        self._check_same_user(sender)
         log.debug('FilterStatus() called: %s', exclude)
         self._append_or_create_filter('status', exclude, ['current'])
 
@@ -353,6 +370,7 @@ class PackageDetailsTask(TaskBase):
     def worker_callback(self, urpmi, backend):
         pass
 
+
 class SearchFilesTask(TaskBase):
     """ Query for package owning file paths. """
 
@@ -371,6 +389,7 @@ class SearchFilesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def SetRegex(self, regex, sender):
+        self._check_same_user(sender)
         log.debug('SetRegex() called: %s', regex)
         """ Match file names using a regex. """
         self.args.append('fuzzy')
