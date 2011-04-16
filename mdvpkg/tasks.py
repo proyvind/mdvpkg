@@ -106,6 +106,7 @@ class TaskBase(dbus.service.Object):
         """ Run the task. """
         log.debug('Run called: %s, %s', sender, self.path)
         self._check_same_user(sender)
+        self._check_if_has_run()
         self.status = STATUS_RUNNING
         self._run()
 
@@ -142,13 +143,19 @@ class TaskBase(dbus.service.Object):
                   self.path,
                   status)
 
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='(ssss)a{sv}')
+    def PackageDetails(self, nvra, details):
+        log.debug('PackageDetails emitted: %s', nvra)
+
     def run(self):
         """ Default runner, must be implemented in childs. """
         raise NotImplementedError()
 
     def cancel(self):
         self.cancelled = True
-        if self.status == STATUS_SETTING_UP:
+        if self.status == STATUS_SETTING_UP \
+                or self.status == STATUS_READY:
             self.Finished(EXIT_CANCELLED)
             self._remove_and_cleanup()
 
@@ -165,13 +172,16 @@ class TaskBase(dbus.service.Object):
                     gobject.idle_add(step, gen)
             except StopIteration:
                 self.status = STATUS_READY
-                self.Finished(EXIT_SUCCESS)
-                self._remove_and_cleanup()
+                self._on_ready()
             except Exception as e:
                 self.Error(ERROR_TASK_EXCEPTION, e.message)
                 self.Finished(EXIT_FAILED)
                 self._remove_and_cleanup
         gobject.idle_add(step, self.run())
+
+    def _on_ready(self):
+        self.Finished(EXIT_SUCCESS)
+        self._remove_and_cleanup()
 
     def _remove_and_cleanup(self):
         """ Remove the task from the bus and clean up. """
@@ -208,6 +218,12 @@ class TaskBase(dbus.service.Object):
         """ Check if the sender is the task owner created the task. """
         if self._sender != sender:
             raise mdvpkg.exceptions.NotOwner()
+
+    def _check_if_has_run(self):
+        """ Check if Run() has been called. """
+        if self.status != STATUS_SETTING_UP:
+            log.info('Task has already been run')
+            raise mdvpkg.exceptions.TaskBadState
 
 
 class ListMediasTask(TaskBase):
@@ -251,20 +267,27 @@ class ListPackagesTask(TaskBase):
                                   'match_func': self._match_group},
                         'status': {'sets': {},
                                    'match_func': self._match_status},}
-        self.details = []
+        self._cached = False
+        self._pkg_cache = []
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='(ssss)(sssstt)bb')
-    def Package(self, nvra, details, upgrades, downgrades):
+                         signature='(ssss)ss(bb)')
+    def Package(self, nvra, description, status, updates):
         log.debug('Package emitted: %s', nvra)
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='t')
+    def Ready(self, total_of_matches):
+        log.debug('Ready emitted: %s', total_of_matches)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='asb',
                          out_signature='',
                          sender_keyword='sender')
     def FilterName(self, names, exclude, sender):
-        self._check_same_user(sender)
         log.debug('FilterName() called: %s', names)
+        self._check_same_user(sender)
+        self._check_if_has_run()
         self._append_or_create_filter('name', exclude, names)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -272,8 +295,9 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterMedia(self, medias, exclude, sender):
-        self._check_same_user(sender)
         log.debug('FilterMedia() called: %s', medias)
+        self._check_same_user(sender)
+        self._check_if_has_run()
         self._append_or_create_filter('media', exclude, medias)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -281,8 +305,9 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterGroup(self, groups, exclude, sender):
-        self._check_same_user(sender)
         log.debug('FilterGroup() called: %s', groups)
+        self._check_same_user(sender)
+        self._check_if_has_run()
         self._append_or_create_filter('group', exclude, groups)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -290,8 +315,9 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterUpgrade(self, exclude, sender):
+        log.debug('FilterUpgrade() called: %s', exclude)
         self._check_same_user(sender)
-        log.debug('FilterStatus() called: %s', exclude)
+        self._check_if_has_run()
         self._append_or_create_filter('status', exclude, ['upgrade'])
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -299,8 +325,9 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterDowngrade(self, exclude, sender):
+        log.debug('FilterDowngrade() called: %s', exclude)
         self._check_same_user(sender)
-        log.debug('FilterStatus() called: %s', exclude)
+        self._check_if_has_run()
         self._append_or_create_filter('status', exclude, ['downgrade'])
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -308,8 +335,9 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterNew(self, exclude, sender):
+        log.debug('FilterNew() called: %s', exclude)
         self._check_same_user(sender)
-        log.debug('FilterStatus() called: %s', exclude)
+        self._check_if_has_run()
         self._append_or_create_filter('status', exclude, ['new'])
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -317,12 +345,98 @@ class ListPackagesTask(TaskBase):
                          out_signature='',
                          sender_keyword='sender')
     def FilterInstalled(self, exclude, sender):
+        log.debug('FilterInstalled() called: %s', exclude)
         self._check_same_user(sender)
-        log.debug('FilterStatus() called: %s', exclude)
+        self._check_if_has_run()
         self._append_or_create_filter('status', exclude, ['current'])
 
-    def _append_or_create_filter(self, filter_name, exclude, data):
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='t',
+                         out_signature='',
+                         sender_keyword='sender')
+    def Get(self, index, sender):
+        log.debug('Get() called')
+        self._check_same_user(sender)
+        if self.status != STATUS_READY:
+            raise mdvpkg.exceptions.TaskBadState
+        (pkg, version) = self._pkg_cache[index]
+        self._emit_package(pkg, version['rpm'])
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='t',
+                         out_signature='',
+                         sender_keyword='sender')
+    def GetDetails(self, index, sender):
+        log.debug('Get() called')
+        self._check_same_user(sender)
+        if self.status != STATUS_READY:
+            raise mdvpkg.exceptions.TaskBadState
+        (pkg, version) = self._pkg_cache[index]
+        rpm = version['rpm']
+        self.PackageDetails(
+            (rpm.name, rpm.version, rpm.release, rpm.arch),
+            { 'status': pkg.status,
+              'media': version['media'],
+              'installtime': version.get('installtime', 0),
+              'size': rpm.size,
+              'group': rpm.group,
+              'summary': rpm.summary,
+              'has_upgrades': bool(pkg.upgrades),
+              'has_downgrades': bool(pkg.downgrades) }
+        )
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='',
+                         out_signature='',
+                         sender_keyword='sender')
+    def SetCached(self, sender):
         """ 
+        Set ListPackage to hold results in cache.
+        
+        The task will be removed from bus only if sender call
+        Release() or inactive.
+        """
+        log.debug('SetCached() called')
+        self._check_same_user(sender)
+        self._check_if_has_run()
+        self._cached = True
+
+    def run(self):
+        for p in self.urpmi.packages:
+            if self._is_filtered(p.name, 'name') \
+                    or self._is_filtered(p, 'status'):
+                continue
+            for version in p.versions:
+                rpm = version['rpm']
+                media = version['media']
+                if self._is_filtered(media, 'media') \
+                        or self._is_filtered(rpm.group, 'group'):
+                    continue
+                installtime = str()
+                if self._cached:
+                    self._pkg_cache.append((p, version))
+                else:
+                    self._emit_package(p, rpm)
+                yield
+
+    def _on_ready(self):
+        if self._cached:
+            self.Ready(len(self._pkg_cache))
+        else:
+            TaskBase._on_ready(self)
+
+    def _emit_package(self, pkg, rpm):
+        self.Package((rpm.name, rpm.version, rpm.release, rpm.arch),
+                     rpm.summary,
+                     pkg.status,
+                     (bool(pkg.upgrades), bool(pkg.downgrades)))
+
+    #
+    # Filter callbacks and helpers
+    #
+
+    def _append_or_create_filter(self, filter_name, exclude, data):
+        """
         Append more data to the filter set (selected by exclude flag),
         or create and initialize the set if it didn't existed.
         """
@@ -332,10 +446,6 @@ class ListPackagesTask(TaskBase):
             _set = set()
             sets[exclude] = _set
         _set.update(data)
-
-    #
-    # Filter Callbacks
-    #
 
     def _match_name(self, candidate, patterns):
         for pattern in patterns:
@@ -371,31 +481,6 @@ class ListPackagesTask(TaskBase):
                 return True
         return False
 
-    def run(self):
-        for p in self.urpmi.packages:
-            if self._is_filtered(p.name, 'name') \
-                    or self._is_filtered(p, 'status'):
-                continue
-            for version in p.versions:
-                rpm = version['rpm']
-                media = version['media']
-                if self._is_filtered(media, 'media') \
-                        or self._is_filtered(rpm.group, 'group'):
-                    continue
-                installtime = str()
-                self.Package(
-                    (rpm.name, rpm.version, rpm.release, rpm.arch),
-                    (p.status,
-                     media,
-                     rpm.group,
-                     rpm.summary,
-                     rpm.size,
-                     version.get('installtime', 0)),
-                    bool(p.upgrades),
-                    bool(p.downgrades)
-                )
-                yield
-
 
 class PackageDetailsTask(TaskBase):
     """ Query for details of a package. """
@@ -403,11 +488,6 @@ class PackageDetailsTask(TaskBase):
     def __init__(self, daemon, sender, nvra):
         TaskBase.__init__(self, daemon, snder)
         self.nvra = nvra
-
-    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='(ssss)sstt')
-    def PackageDetails(self, nvra, group, summary, size, installtime):
-        log.debug('PackageDetails emitted: %s', nvra)
 
     def run(self):
         yield
