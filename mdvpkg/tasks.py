@@ -37,33 +37,62 @@ import mdvpkg.exceptions
 # Delay before removing tasks from the bus:
 TASK_DEL_TIMEOUT = 5
 
+## Finish status
+EXIT_SUCCESS = 'exit-success'
+EXIT_FAILED = 'exit-failed'
+EXIT_CANCELLED = 'exit-cancelled'
+
+## Error status
+ERROR_TASK_EXCEPTION = 'error-task-exception'
+
+## Task status
+# The task is being setup
+STATUS_SETTING_UP = 'status-setting-up'
+# Run() has just been called
+STATUS_RUNNING = 'status-running'
+# The task runner has finished
+STATUS_READY = 'status-ready'
+
 log = logging.getLogger("mdvpkgd.task")
 
 
 class TaskBase(dbus.service.Object):
     """ Base class for all tasks. """
 
-    def __init__(self, bus, sender, worker):
-        self._bus = bus
+    def __init__(self, daemon, sender):
+        self._bus = daemon.bus
         self.path = '%s/%s' % (mdvpkg.DBUS_TASK_PATH, uuid.uuid4().get_hex())
         dbus.service.Object.__init__(
             self,
             dbus.service.BusName(mdvpkg.DBUS_SERVICE, self._bus),
             self.path
             )
+        self.urpmi = daemon.urpmi
+        self.backend = daemon.backend
+        self.cancelled = False
         self._sender = sender
-        self._worker = worker
+        self._status = STATUS_SETTING_UP
+
         # Passed to backend when call_backend is called ...
         self.backend_args = []
         self.backend_kwargs = {}
-        # If the task was already sent to the worker:
-        self._queued = False
+
         # Watch for sender (which is a unique name) changes:
         self._sender_watch = self._bus.watch_name_owner(
                                      self._sender,
                                      self._sender_owner_changed
                                  )
         log.debug('Task created: %s, %s', self._sender, self.path)
+
+    @property
+    def status(self):
+        """ Task status. """
+        return self._status
+
+    @status.setter
+    def status(self, status):
+        self._status = status
+        self.StatusChanged(status)
 
     #
     # D-Bus Interface
@@ -75,12 +104,10 @@ class TaskBase(dbus.service.Object):
                          sender_keyword='sender')
     def Run(self, sender):
         """ Run the task. """
+        log.debug('Run called: %s, %s', sender, self.path)
         self._check_same_user(sender)
-        log.debug('Run method called: %s, %s', sender, self.path)
-        if self._queued:
-            raise mdvpkg.exceptions.TaskAlreadyRunning()
-        self._queued = True
-        self._worker.push(self)
+        self.status = STATUS_RUNNING
+        self._run()
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='',
@@ -88,70 +115,83 @@ class TaskBase(dbus.service.Object):
                          sender_keyword='sender')
     def Cancel(self, sender):
         """ Cancel and remove the task. """
+        log.debug('Cancel called: %s, %s', sender, self.path)
         self._check_same_user(sender)
-        log.debug('Cancel method called: %s, %s', sender, self.path)
-        self._cancel()
-
-    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='')
-    def Finished(self):
-        """ Signals that the task has finished successfully. """
-        log.debug('Finished signal emitted: %s', self.path)
-        pass
+        self.cancel()
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='s')
-    def Error(self, msg):
+    def Finished(self, status):
+        """ Signals that the task has finished successfully. """
+        log.debug('Finished emitted: %s %s', self.path, status)
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='ss')
+    def Error(self, status, message):
         """ Signals a task error during running. """
-        log.debug('Error signal emitted: %s (%s)',
+        log.debug('Error emitted: %s, %s, %s',
                   self.path,
-                  msg)
-        pass
+                  status,
+                  message)
 
-    #
-    # Worker Callbacks
-    #
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='s')
+    def StatusChanged(self, status):
+        """ Signals the task status has changed. """
+        log.debug('StatusChanged emitted: %s, %s',
+                  self.path,
+                  status)
 
-    def worker_callback(self, urpmi, backend):
-        """ Called by the worker to perform the task. """
+    def run(self):
+        """ Default runner, must be implemented in childs. """
         raise NotImplementedError()
 
-    def exit_callback(self):
-        """ Called by the worker when the task is finished. """
-        self.Finished()
-        self._remove_and_cleanup()
+    def cancel(self):
+        self.cancelled = True
+        if self.status == STATUS_SETTING_UP:
+            self.Finished(EXIT_CANCELLED)
+            self._remove_and_cleanup()
 
-    #
-    # Private and helpers
-    #
-
-    def _cancel(self):
-        if self._queued:
-            self._worker.cancel(self)
-            self._queued = False
-        self._remove_and_cleanup()
+    def _run(self):
+        """ Controls the co-routine running the task. """
+        def step(gen):
+            try:
+                gen.next()
+                if self.cancelled:
+                    gen.close()
+                    self.Finished(EXIT_CANCELLED)
+                    self._remove_and_cleanup()
+                else:
+                    gobject.idle_add(step, gen)
+            except StopIteration:
+                self.status = STATUS_READY
+                self.Finished(EXIT_SUCCESS)
+                self._remove_and_cleanup()
+            except Exception as e:
+                self.Error(ERROR_TASK_EXCEPTION, e.message)
+                self.Finished(EXIT_FAILED)
+                self._remove_and_cleanup
+        gobject.idle_add(step, self.run())
 
     def _remove_and_cleanup(self):
         """ Remove the task from the bus and clean up. """
         self._sender_watch.cancel()
-        # Small timeout so the signal can propagate:
-        gobject.timeout_add_seconds(TASK_DEL_TIMEOUT,
-                                    self.remove_from_connection)
+        self.remove_from_connection()
         log.debug('Task removed: %s', self.path)
 
-    def _backend_helper(self, backend, command):
-        """
-        Helper to receive call backend commands, handling backend
-        errors.  It yields each backend reponse.
-        """
-        try:
-            for l in backend.do(command,
-                                *self.backend_args,
-                                **self.backend_kwargs):
-                yield l
-        except mdvpkg.worker.BackendDoError as msg:
-            log.debug('Backend error: %s', msg)
-            self.Error(msg.args[0])
+    ## FIXME Temporarly remove the backend helper some task needs it.
+    # def _backend_helper(self, backend, command):
+    #     """ Helper to receive call backend commands, handling backend
+    #     errors.  It yields each backend reponse.
+    #     """
+    #     try:
+    #         for l in backend.do(command,
+    #                             *self.backend_args,
+    #                             **self.backend_kwargs):
+    #             yield l
+    #     except mdvpkg.worker.BackendDoError as msg:
+    #         log.debug('Backend error: %s', msg)
+    #         self.Error(msg.args[0])
 
     def _sender_owner_changed(self, connection):
         """ Called when the sender owner changes. """
@@ -162,10 +202,10 @@ class TaskBase(dbus.service.Object):
             log.debug('Sender disconnected: %s, %s',
                       self._sender,
                       self.path)
-            self._cancel()
+            self.cancel()
 
     def _check_same_user(self, sender):
-        """ Check if the sender is the same that created the task. """
+        """ Check if the sender is the task owner created the task. """
         if self._sender != sender:
             raise mdvpkg.exceptions.NotOwner()
 
@@ -176,12 +216,12 @@ class ListMediasTask(TaskBase):
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='sbb')
     def Media(self, media_name, update, ignore):
-        log.debug('Media signal emitted: %s', media_name)
-        pass
+        log.debug('Media emitted: %s', media_name)
 
-    def worker_callback(self, urpmi, backend):
-        for media in urpmi.medias.values():
+    def run(self):
+        for media in self.urpmi.medias.values():
             self.Media(media.name, media.update, media.ignore)
+            yield
 
 
 class ListGroupsTask(TaskBase):
@@ -190,11 +230,12 @@ class ListGroupsTask(TaskBase):
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='st')
     def Group(self, group, count):
-        log.debug('Group signal emitted: %s', group)
+        log.debug('Group emitted: %s', group)
 
-    def worker_callback(self, urpmi, backend):
-        for (group, count) in urpmi.groups.items():
+    def run(self):
+        for (group, count) in self.urpmi.groups.items():
             self.Group(group, count)
+            yield
 
 
 class ListPackagesTask(TaskBase):
@@ -215,7 +256,7 @@ class ListPackagesTask(TaskBase):
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='(ssss)(sssstt)bb')
     def Package(self, nvra, details, upgrades, downgrades):
-        log.debug('Package signal emitted: %s', nvra)
+        log.debug('Package emitted: %s', nvra)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='asb',
@@ -330,8 +371,8 @@ class ListPackagesTask(TaskBase):
                 return True
         return False
 
-    def worker_callback(self, urpmi, backend):
-        for p in urpmi.packages:
+    def run(self):
+        for p in self.urpmi.packages:
             if self._is_filtered(p.name, 'name') \
                     or self._is_filtered(p, 'status'):
                 continue
@@ -353,36 +394,36 @@ class ListPackagesTask(TaskBase):
                     bool(p.upgrades),
                     bool(p.downgrades)
                 )
+                yield
 
 
 class PackageDetailsTask(TaskBase):
     """ Query for details of a package. """
 
-    def __init__(self, bus, sender, worker, nvra):
-        TaskBase.__init__(self, bus, sender, worker)
+    def __init__(self, daemon, sender, nvra):
+        TaskBase.__init__(self, daemon, snder)
         self.nvra = nvra
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='(ssss)sstt')
     def PackageDetails(self, nvra, group, summary, size, installtime):
-        log.debug('PackageDetails signal emitted: %s', nvra)
+        log.debug('PackageDetails emitted: %s', nvra)
 
-    def worker_callback(self, urpmi, backend):
-        pass
+    def run(self):
+        yield
 
 
 class SearchFilesTask(TaskBase):
     """ Query for package owning file paths. """
 
-    def __init__(self, bus, sender, worker, pattern):
-        TaskBase.__init__(self, bus, sender, worker)
+    def __init__(self, daemon, sender, pattern):
+        TaskBase.__init__(self, daemon, sender)
         self.backend_kwargs['pattern'] = pattern
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
                          signature='ssssas')
     def PackageFiles(self, name, version, release, arch, files):
-        log.debug('PackageFiles signal emitted: %s, %s', name, files)
-        pass
+        log.debug('PackageFiles emitted: %s, %s', name, files)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='b',
@@ -394,7 +435,8 @@ class SearchFilesTask(TaskBase):
         """ Match file names using a regex. """
         self.args.append('fuzzy')
 
-    def worker_callback(self, urpmi, backend):
+    def run(self):
         for r in self._backend_helper(backend, 'search_files'):
             self.PackageFiles(r['name'], r['version'], r['release'],
                                   r['arch'], r['files'])
+            yield

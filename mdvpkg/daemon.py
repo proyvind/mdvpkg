@@ -35,7 +35,7 @@ import signal
 import mdvpkg
 import mdvpkg.exceptions
 import mdvpkg.tasks
-import mdvpkg.worker
+from mdvpkg.worker import Backend
 
 
 # setup default dbus mainloop:
@@ -85,21 +85,28 @@ class MDVPKGDaemon(dbus.service.Object):
 
         if not bus:
             bus = dbus.SystemBus()
-        self._bus = bus
+        self.bus = bus
         if not backend_path:
             backend_path = mdvpkg.DEFAULT_BACKEND_PATH
         self._loop = gobject.MainLoop()
         try:
             bus_name = dbus.service.BusName(mdvpkg.DBUS_SERVICE,
-                                            self._bus,
+                                            self.bus,
                                             do_not_queue=True)
         except dbus.exceptions.NameExistsException:
             log.critical('Someone is using %s service name...',
                          mdvpkg.DBUS_SERVICE)
             sys.exit(1)
         dbus.service.Object.__init__(self, bus_name, mdvpkg.DBUS_PATH)
-        self._worker = mdvpkg.worker.TaskWorker(backend_path)
-        gobject.timeout_add(IDLE_CHECK_INTERVAL, self._check_for_inactivity)
+        # TODO Signal progress of urpmi and backend initialization
+        self.urpmi =  mdvpkg.repo.URPMI()
+        log.info('Loading urpmi database')
+        self.urpmi.load_db()
+        log.info('Loading urpmi backend')
+        self.backend = Backend(backend_path)
+        log.info('Daemon is ready')
+        ## FIXME Temporarly removed the inactivity check
+        # gobject.timeout_add(IDLE_CHECK_INTERVAL, self._check_for_inactivity)
 
     def run(self):
         try:
@@ -164,30 +171,28 @@ class MDVPKGDaemon(dbus.service.Object):
         log.info("Shutdown was requested")
         log.debug("Quitting main loop...")
         self._loop.quit()
-        log.debug("Terminating worker...")
-        self._worker.stop()
 
     def _create_task(self, task_class, sender, *args):
         log.debug('_create_task(): %s, %s, args=%s',
                   task_class.__name__,
                   sender,
                   args)
-        task = task_class(self._bus, sender, self._worker, *args)
+        task = task_class(self, sender, *args)
         return task.path
 
     def _quit_handler(self, signum, frame):
         """ Handler for quiting signals. """
         self.Quit(None)
 
-    def _check_for_inactivity(self):
-        """
-        Shutdown the daemon if it has been inactive for time specified
-        in IDLE_TIMEOUT.
-        """
-        log.debug("Checking for inactivity")
-        if self._worker.inactive(IDLE_TIMEOUT) \
-               and not gobject.main_context_default().pending():
-            log.info("Quiting due to inactivity")
-            self.Quit(None)
-            return False
-        return True
+    # def _check_for_inactivity(self):
+    #     """
+    #     Shutdown the daemon if it has been inactive for time specified
+    #     in IDLE_TIMEOUT.
+    #     """
+    #     log.debug("Checking for inactivity")
+    #     if self._worker.inactive(IDLE_TIMEOUT) \
+    #            and not gobject.main_context_default().pending():
+    #         log.info("Quiting due to inactivity")
+    #         self.Quit(None)
+    #         return False
+    #     return True
