@@ -20,7 +20,9 @@
 ## Author(s): Eugeni Dodonov <eugeni@mandriva.com>
 ##            J. Victor Martins <jvdm@mandriva.com>
 ##
-""" URPMI repository manipulation. """
+"""
+URPMI repository manipulation.
+"""
 
 
 import re
@@ -194,9 +196,9 @@ class RpmPackage(object):
 
 
 class UrpmiPackage(object):
-    def __init__(self,
-                 urpmi,
-                 name):
+    """ A proxy to access package data in the urpmi package cache. """
+
+    def __init__(self, urpmi, name):
         self._urpmi = urpmi
         self.name = name
 
@@ -210,14 +212,21 @@ class UrpmiPackage(object):
 
     @property
     def upgrades(self):
+        """ List of upgrade versions, empty if no upgrades are
+        available.
+        """
         return self._installed_updates('upgrade')
 
     @property
     def downgrades(self):
+        """ List of downgrade versions, empty if no upgrades are
+        available.
+        """
         return self._installed_updates('downgrade')
 
     @property
     def versions(self):
+        """ List of package versions by status. """
         return self._urpmi._cache[self.name][self.status].values()
 
     def _installed_updates(self, update_type):
@@ -225,7 +234,57 @@ class UrpmiPackage(object):
 
 
 class URPMI(object):
-    """ Represents a urpmi database. """
+    """ 
+    Represents a urpmi database.
+    
+    Packages are stored in a 'package cache', keyed by name.  For
+    example, to access the cache and get the media for
+    'foobar-ver-rel' package you would write:
+
+    >>> self._cache['foobar']['current'][('ver', 'rel')]['media']
+
+    The cache is a python dict (where keys are the package names).
+    Each package version available for each name is then grouped by
+    status:
+
+    - new: Package versions are new (the package name is not
+      installed) and do not upgrade/downgrade an installed version.
+
+    - current: Package versions are installed.
+
+    - upgrade: Package versions are upgrades to the highest version
+      installed.
+
+    - downgrade: Package versions are downgrades to the highest
+      version installed.
+
+    Package versions are tuples (version, release) as returned by
+    RpmPackage.vr property.
+
+    So each cache entry (cache dictionary values) is a python dict
+    with status as keys and a dictionary of versions as values (status
+    with no packages have an empty dictionary).
+
+    Package versions residing in 'upgrade' or 'downgrade' group
+    implies the existance of a version in 'current'.  So each package
+    name will necessarily have versions in 'new' or 'current'
+    (exclusively).
+
+    Each package version is stored in a 'package version description',
+    a python dict with the following keys:
+
+    - rpm: A RpmPackage instance of the package.
+
+    - installtime: Installation time (present only if package version
+      is in 'current').
+
+    - media: Media where package was found, or '' (empyt string) if
+      not found in any media.
+
+    See 'self._get_or_create_cache_entry()' and
+    'self._create_pkg_desc()' to see how those data structures are
+    created.    
+    """
 
     _urpmi_cfg = "/etc/urpmi/urpmi.cfg"
 
@@ -250,12 +309,18 @@ class URPMI(object):
 
     @property
     def packages(self):
+        """ A generator for each package in the cache instantiated as
+        UrpmiPackage object.
+        """
         if not self._cache:
             self.load_db()
         for name in self._cache.keys():
             yield UrpmiPackage(self, name)
 
     def load_db(self):
+        """ Parse all available medias and locally installed packages
+        and populates the package cache.
+        """
         self._cache = {}
         self._load_installed()
         for media in [m for m in self.medias.values() if not m.ignore]:
@@ -281,6 +346,7 @@ class URPMI(object):
                                shell=True)
         for line in rpm.stdout:
             fields = line.split('@')
+            # Initialize without INSTALLTIME:
             pkg = RpmPackage(*fields[:-1])
             installtime = int(fields[-1])
 
