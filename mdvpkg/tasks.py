@@ -386,6 +386,24 @@ class ListPackagesTask(TaskBase):
         )
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
+                         in_signature='sb',
+                         out_signature='',
+                         sender_keyword='sender')
+    def Sort(self, key, reverse, sender):
+        """ Sort the a cached resulls with key. """
+        log.debug('Sort() called: %s', key)
+        self._check_same_user(sender)
+        if self.status != STATUS_READY:
+            raise mdvpkg.exceptions.TaskBadState
+        if key in {'media', 'installtime'}:
+            key_func = lambda pkg: pkg[1][key]
+        elif key in {'status'}:
+            key_func = lambda pkg: getattr(pkg[0], key)
+        else:
+            key_func = lambda pkg: getattr(pkg[1]['rpm'], key)
+        self._pkg_cache.sort(key=key_func, reverse=reverse)
+
+    @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
                          in_signature='',
                          out_signature='',
                          sender_keyword='sender')
