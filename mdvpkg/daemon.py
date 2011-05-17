@@ -34,6 +34,7 @@ import signal
 
 import mdvpkg
 import mdvpkg.exceptions
+import mdvpkg.repo
 import mdvpkg.tasks
 from mdvpkg.worker import Backend
 
@@ -161,6 +162,16 @@ class MDVPKGDaemon(dbus.service.Object):
         return self._create_task(mdvpkg.tasks.SearchFilesTask,
                                  sender,
                                  files)
+
+    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
+                         in_signature='as',
+                         out_signature='o',
+                         sender_keyword='sender')
+    def InstallPackages(self, names, sender):
+        log.info('InstallPackages() called')
+        return self._create_task(mdvpkg.tasks.InstallPackagesTask,
+                                 sender,
+                                 names)
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature="",
