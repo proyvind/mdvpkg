@@ -26,391 +26,256 @@
 use warnings;
 use strict;
 
-use URPM;
-use urpm;
-use urpm::media;
-use urpm::args;
-use urpm::select;
-
+use URPM qw();
+use urpm qw();
+use urpm::media qw();
+use urpm::args qw();
+use urpm::select qw();
+use urpm::main_loop qw();
 
 $| = 1;
 
 binmode STDOUT, ':encoding(utf8)';
 binmode STDIN, ':encoding(utf8)';
 
-my $urpm = urpm->new_parse_cmdline;
-$urpm->{error} = sub {};
-
-my $db;                        # URPM db, initially not opened
-
-our %control;
-$control{cancellable} = 1;     # tasks are cancellable by default
-$control{term_requested} = 0;  # flag to terminate after a task
-
-urpm::media::configure($urpm);
-
+our $read_tasks = 1;
 $SIG{TERM} = sub {
-    if (not $control{cancellable}) {
-	$control{term_requested} = 1;
-    }
-    else {
-	exit 1;
-    }
+    $read_tasks = 0;
 };
 
-
 MAIN: {
-    eval {
-	defined(my $cmd = <>) or do {
-	    close_backend();
+    # Initializing urpmi ...
+    my $urpm = urpm->new_parse_cmdline;
+    urpm::media::configure($urpm);
+
+    while ($read_tasks and defined(my $task_string = <>)) {
+	chomp($task_string);
+	my ($name, @args) = split(/\t/, $task_string);
+	eval {
+	    my $task_func = "on_task__$name";
+	    defined $main::{$task_func} 
+	        or die "Unknown task name: '$name'\n";
+	    $main::{$task_func}->($urpm, @args);
+	    return 1;
+	}
+	or do {
+	    chomp($@);
+	    task_response('EXCEPTION', str => $@);
 	};
-	chomp($cmd);
-
-	my %args = ();
-	while (<>) {
-	    chomp;
-	    # empty line means "run command":
-	    $_ or do {
-		my $task_func = "on_command__$cmd";
-		defined $main::{$task_func} 
-		    or die "Unknown task name: '$cmd'\n";
-		$main::{$task_func}->(%args);
-		end();
-
-		$control{cancellable} = 1;
-
-		if ($control{term_requested}) {
-		    exit 1;
-		}
-
-		# For the eval block:
-		return 1;
-	    };
-
-	    if (/([^=]+)=(.*)/) {
-		$args{$1} = $2;
-	    }
-	    else {
-		$args{$_} = ( $_ =~ s/^~// ? 0 : 1 );
-	    }
-	}
-
-	die "Malformed command argument: EOF\n";
     }
-    or do {
-	chomp($@);
-	error($@);
-    };
-    redo MAIN;
-}
-
-sub close_backend {
-    exit 0;
-}
-
-# result - send a result response to caller
-sub result {
-    _send_response('RESULT', @_);
-}
-
-# error - send an error response to caller
-sub error {
-    _send_response('ERROR', @_);
-}
-
-# log - send a log response to caller
-sub log_ {
-    _send_response('LOG', @_);
-}
-
-sub end {
-    _send_response('END', '');
-}
-
-sub _send_response {
-    my ($tag, $format, @args) = @_;
-    my $s;
-
-    if (@args) {
-	$s = sprintf($format, @args);
-    }
-    else {
-	$s = $format;
-    }
-
-    printf("%s %s\n", $tag, $s);
-}
-
-sub py_bool_str {
-    return $_[0] ? 'True' : 'False';
-}
-
-sub py_str {
-    $_[0] =~ s|'|\\'|g;
-    return "'" . $_[0] . "'";
-}    
-
-# py_package_str - returns python string for package data
-#
-# $pkg		urpm package object
-# $tags_ref	array ref to list of package tags to add
-# %extra	hash of extra data, keyed by type:
-#               ( bool => { name => val }, str => { name => val} )
-#
-# if not @tags use qw(name version release arch) by default.
-#
-sub py_package_str {
-    my ($pkg, $tags_ref, %extra) = @_;
-
-    # This will hold the final python string:
-    my $py_str = "{";
-
-    for my $tag (@$tags_ref) {
-	$py_str .= sprintf("'%s':%s,", $tag, py_str($pkg->$tag));
-    }
-
-    # Each key provide a helper to produce python string according to
-    # $type:
-    my %helper = (
-	bool => \&py_bool_str,
-	str => \&py_str,
-	int => sub { sprintf("%d", $_[0] || 0) },
-	float => sub { sprintf("%f", $_[0]) },
-	);
-	  
-    foreach my $type (keys %extra) {
-	while ( my ($name, $value) = each %{ $extra{$type} } ) {
-	    $py_str .= sprintf("'%s':%s,", 
-			       $name,
-			       $helper{$type}->($value));
-	}
-    }
-
-    $py_str .= '}';
-    return $py_str;
-}
-
-sub open_urpm_db {
-    if (not $db) {
-	# TODO die() if not possible to open:
-	$db = URPM::DB::open();
-	$urpm->compute_installed_flags($db);
-    }
-    return $db;
-}
-
-##
-# traverse_pacakges - traverse all installed and installable packages
-#
-# $urpm		urpm object
-# $db		URPM::DB object
-# $callback	$callback->($pkg) for each package
-#
-# Packages passed to callback have flag_installed and flag_upgrade
-# correctly set.
-#
-sub traverse_packages {
-    my ($urpm, $db, $callback) = @_;
-
-    # Traverse installable packages ...
-    foreach my $pkg (@{$urpm->{depslist}}) {
-        if ($pkg->flag_upgrade) {
-	    $callback->($pkg);
-	}
-    }
-
-    # Traverse installed packages ...
-    $db->traverse(
-    	sub {
-	    my ($pkg) = @_;
-	    $pkg->set_flag_installed(1);
-	    $pkg->set_flag_upgrade(0);
-	    $callback->($pkg);
-	}
-	);
-}
-
-sub get_media_name {
-    my ($urpm, $pkg) = @_;
-
-    my $id;
-    if ($pkg->id) {
-	$id = $pkg->id;
-    }
-    elsif (my @pkgs = $urpm->packages_by_name($pkg->name)) {
-	foreach (@pkgs) {
-	    if ($_->fullname() eq $pkg->fullname()) {
-		$id = $_->id;
-		last;
-	    }
-	}
-    }
-
-    my $media = '';
-    if ($id) {
-	foreach (@{ $urpm->{media} }) {
-	    if ($id >= ($_->{start}||0) and $id <= ($_->{end}||0)) {
-		$media = $_->{name};
-		last;
-	    }
-	}
-    }
-    return $media;
-}
-
-sub get_status {
-    my ($pkg) = @_;
-    
-    if ($pkg->flag_installed and not $pkg->flag_upgrade) {
-	return 'local';
-    }
-
-    if ($pkg->flag_installed and $pkg->flag_upgrade) {
-	return 'upgrade';
-    }
-
-    if (not $pkg->flag_installed and $pkg->flag_upgrade) {
-	return 'new';
-    }
-}
-
-sub filter_package {
-    my ($pkg, %filters) = @_;
-
-    %filters or return 1;
-
-    if (my $filter = $filters{'media'}) {
-	get_media_name($urpm, $pkg) eq $filter or return 0;
-    }
-
-    if (my $filter = $filters{'name'}) {
-	$pkg->name eq $filter or return 0;
-    }
-
-    if (my $filter = $filters{'group'}) {
-	$pkg->group eq $filter or return 0;
-    }
-
-    foreach ( qw(local upgrade new) ) {
-	if (exists $filters{$_}) {
-	    my $status = get_status($pkg);
-	    return 0 if ($filters{$_} ? $status ne $_ : $status eq $_);
-	}
-    }
-
-    return 1;
 }
 
 #
-# Command Handlers
+# Backend responses
 #
 
-sub on_command__list_medias {
-    foreach (@{$urpm->{media}}) {
-	my ($name, $update, $ignore) 
-	    = ($_->{name}, $_->{update}, $_->{ignore});
-	result("('%s', %s, %s)", 
-	       $name, 
-	       py_bool_str($update), 
-	       py_bool_str($ignore))
+sub task_response {
+    my ($tag, @args) = @_;
+
+    my %value_converters = (
+	'bool' => sub {
+	    return $_[0] ? 'True' : 'False';
+	},
+	'str' => sub {
+	    $_[0] =~ s|'|\\'|g;
+	    return "'" . $_[0] . "'";
+	},
+	'int' => sub {
+	    $_[0] =~ /\d+/ or die "$_[0] is not a number\n";
+	    return $_[0];
+	},
+    );
+
+    my $args_str = '';
+    while (my $type = shift @args) {
+	$args_str .= $value_converters{$type}->(shift @args) . ', ';
     }
+
+    printf("\n%s\t%s\t(%s)\n", '%MDVPKG', $tag, $args_str);
 }
 
-sub on_command__list_packages {
-    my (%args) = @_;
-    my $db = open_urpm_db();
-
-    traverse_packages(
-	$urpm,
-	$db,
-	sub {
-	    my ($pkg) = @_;
-	    filter_package($pkg, %args) or return;
-
-	    result py_package_str(
-		$pkg,
-		[ qw(name version release arch epoch group summary) ],
-		str => { 
-		    status => get_status($pkg)
-		},
-		int => {
-		    size => $pkg->size,
-		}
-		);
-	}
-	);
+sub task_signal {
+    my ($signal_name, @args) = @_;
+    task_response("SIGNAL $signal_name", @args);
 }
 
-sub on_command__list_groups {
-    my $db = open_urpm_db();
-    my %groups = ();
+sub task_status_changed {
+    my ($status) = @_;
+    task_signal('StatusChanged', str => $status)
+}
 
-    traverse_packages(
+sub task_done {
+    task_response('DONE');
+}
+
+#
+# Task Handlers
+#
+
+sub on_task__install_packages {
+    my ($urpm, @names) = @_;
+
+    @names or die "Missing package names to install\n";
+
+    # 1. Search packages by name, getting their id ...
+
+    my %packages;
+    urpm::select::search_packages(
 	$urpm, 
-	$db,
-	sub {
-	    my ($pkg) = @_;
-	    my $group = $pkg->group();
-	    exists $groups{$group} or $groups{$group} = 0;
-	    ++$groups{$group};
-	}
-	);
+	\%packages,
+	\@names, 
+    );
 
-    foreach my $group (keys %groups) {
-	my $count = $groups{$group};
-	result "('$group', $count)";
-    }
-}
+    # 2. lock urpmi and rpm databases
 
-sub on_command__package_details {
-    my (%args) = @_;
-    my $db = open_urpm_db();
+    # Here we lock urpmi & rpm databases
+    # In third argument we can specified if the script must wait until urpmi or rpm
+    # databases are locked
+    my $lock = urpm::lock::urpmi_db($urpm, undef, wait => 0);
+    my $rpm_lock = urpm::lock::rpm_db($urpm, 'exclusive');
 
-    my $name = $args{name} 
-        or die "Missing required parameter: name\n";
+    # 3. resolve dependencies, get $state object
 
-    # TODO Download and parse hdlist to provide extra information for
-    #      non-installed packages.
+    # pk_print_status(PK_STATUS_ENUM_DEP_RESOLVE);
+    task_status_changed('status-resolving-dependencies');
 
-    traverse_packages(
+    my $state = {};
+    my $restart;
+
+    $restart = urpm::select::resolve_dependencies(
+	           $urpm,
+	           $state,
+	           \%packages,
+	           auto_select => 0,
+	       );
+
+    # 4. Start urpm loop to download, remove and install packages ...
+
+    my $exit_code;
+    my $callback_inst = sub {
+	use Data::Dumper;
+	print "vvv callback_inst vvv\n";
+	print Dumper @_;
+	print "^^^ calback_inst ^^^\n";
+    };
+
+    $exit_code = urpm::main_loop::run(
 	$urpm,
-	$db,
-	sub {
-	    my ($pkg) = @_;
-            if ($pkg->name eq $name) {
+	$state,
+	undef,
+	undef, #\@ask_unselect,
+	\%packages,
+	{
+	    copy_removable => sub {
+		die "Removable media found: $_[0]\n";
+	    },
+	    trans_log => sub {
+		my ($mode, $urlfile, $percent, $total, $eta, $speed) = @_;
 
-		my $installtime = 0;
-		if ($pkg->flag_installed) {
-		    my $name = $pkg->name;
-		    $installtime = `rpm -q $name --qf '%{installtime}'`;
+		my (undef, $file) = split(/: /, $urlfile);
+
+		if ($mode eq 'start') {
+		    task_signal('DownloadStart', str => $file);
 		}
-
-		result py_package_str(
-		    $pkg, 					 
-		    [ qw(name version release arch epoch) ],
-		    str => { media => get_media_name($urpm, $pkg) },
-		    int => { installtime => $installtime },
-		    );
-            }
+		elsif ($mode eq 'progress') {
+		    task_signal('DownloadProgress',
+				str => $file,
+				str => $percent,
+				str => $total,
+				str => $eta,
+				str => $speed);
+		}
+		elsif ($mode eq 'end') {
+		    task_signal('DownloadEnd', str => $file);
+		}
+		elsif ($mode eq 'error') {
+		    # Error message is 3rd argument, saved in $percent
+		    task_signal('DownloadError',
+				str => $file,
+				str => $percent);
+		}
+		else {
+		    die "trans_log callback with unknown mode: $mode\n";
+		}
+	    },
+	    bad_signature => sub {
+		    print 'pk_print_error(PK_ERROR_ENUM_GPG_FAILURE, "Bad or missing GPG signatures");', "\n";
+		    undef $lock;
+		    undef $rpm_lock;
+		    die;
+	    },
+	    trans_error_summary => sub {
+		die "Not implemented callback: trans_error_summary\n";
+	    },
+	    inst => sub {
+		my ($urpm, $type, $id, $subtype, $amount, $total) = @_;
+		my $pkg = $urpm->{depslist}[$id];
+		if ($subtype eq 'progress') {
+		    task_signal('PackageInstall',
+				str => scalar($pkg->fullname),
+				str => $amount,
+				str => $total);
+		}
+		elsif ($subtype eq 'start') {
+		    task_signal('PackageInstallStart',
+				str => scalar($pkg->fullname),
+				str => $total);
+		}
+	    },
+	    trans => sub {
+		my ($urpm, $type, $id, $subtype, $amount, $total) = @_;
+		if ($subtype eq 'progress') {
+		    task_signal('PreparingProgress',
+				str => $amount,
+				str => $total);
+		}
+		elsif ($subtype eq 'stop') {
+		    task_signal('PreparingDone')
+		}
+		elsif ($subtype eq 'start') {
+		    task_signal('PreparingStart', str => $total);
+		}
+	    },
+	    ask_yes_or_no => sub {
+		# Return 1 = Return Yes
+		return 1;
+	    },
+	    need_restart => sub {
+		my ($need_restart_formatted) = @_;
+		print "$_\n" foreach values %$need_restart_formatted;
+	    },
+	    completed => sub {
+		undef $lock;
+		undef $rpm_lock;
+	    },
+	    post_download => sub {
+		print "Not implemented callback: post_download\n";
+	    },
+	    message => sub {
+		my ($_title, $msg) = @_; # graphical title
+		print $_title, $msg, "\n";
+	    }
 	}
-	);
+    );    
 }
 
-sub on_command__search_files {
-    my (%args) = @_;
+sub on_task__search_files {
+    my ($urpm, @files) = @_;
     
     # For each medium, we browse the xml info file, while looking for
     # files which matched with the search term given in argument. We
     # store results in a hash ...
 
     my %results;
-
+    my %args;
     foreach my $medium (urpm::media::non_ignored_media($urpm)) {
-	my $xml_info_file = urpm::media::any_xml_info($urpm,
-						      $medium,
-						      qw( files summary ),
-						      undef,
-						      undef);
+	my $xml_info_file = urpm::media::any_xml_info(
+	                        $urpm,
+	                        $medium,
+	                        qw( files summary ),
+	                        undef,
+	                        \&search_files_sync_logger_callback
+	                    );
 	$xml_info_file or next;
 
 	require urpm::xml_info;
@@ -438,16 +303,19 @@ sub on_command__search_files {
 
     foreach my $fn (keys %results) {
 	my $xml_pkg = $results{$fn}{pkg};
-	my $py_str = sprintf("{'name': '%s', "
-			         . "'version': '%s', "
-			         . "'release': '%s', " 
-			         . "'arch': '%s', 'files': [",
-	       $xml_pkg->name,
-	       $xml_pkg->version,
-	       $xml_pkg->release,
-	       $xml_pkg->arch);
-	$py_str .= sprintf("'%s', ", $_) for (@{ $results{$fn}{files} });
+	my $py_str = sprintf("{'name': %s, "
+			         . "'version': %s, "
+			         . "'release': %s, " 
+			         . "'arch': %s, "
+			         . "'files': [",
+			     py_str($xml_pkg->name),
+			     py_str($xml_pkg->version),
+			     py_str($xml_pkg->release),
+			     py_str($xml_pkg->arch));
+	$py_str .= sprintf('%s, ', py_str($_)) for (@{ $results{$fn}{files} });
 	$py_str .= ']}';
-	result($py_str)
+	task_signal('PackageFiles', $py_str)
     }
+
+    return 'exit-success';
 }
