@@ -19,204 +19,128 @@
 ##
 ## Author(s): J. Victor Martins <jvdm@mandriva.com>
 ##
-""" Task classes and task worker for mdvpkg. """
+"""Working and queue classes for mdvpkg tasks."""
 
 
-import signal
-import time
-import logging
 import gobject
 import subprocess
-import threading
+import os
+import signal
 import collections
-
-import mdvpkg.repo
-
-
-WAIT_TASK_TIMEOUT = 15
-gobject.threads_init()
-
-log_backend = logging.getLogger('mdvpkgd.backend')
-log = logging.getLogger('mdvpkgd.worker')
 
 
 class BackendError(Exception):
-    """Base class for backend exceptions."""
-    pass
-
-
-class BackendDoError(BackendError):
-    """Raised when backend terminated a command in error."""
     pass
 
 
 class Backend(object):
-    """ Represents the running urpm backend. """
+    """Represents a urpmi backend process instance."""
 
     def __init__(self, path):
-        self.path = path
-        self.urpm = None
+        self.path = path        
+        self.proc = None
+        self.task = None
+        self.error = ''
 
-    def run(self):
-        if self.urpm:
-            log_backend.error("run() called and backend's already running.")
-            return
-        self.urpm = subprocess.Popen('',
+    @property
+    def running(self):
+        if self.proc != None:
+            return self.proc.poll() == None
+        return False
+
+    def start(self):
+        """ Starts the backend's process. """
+        if self.running:
+            raise Exception, 'backend already running'
+        self.proc = subprocess.Popen('',
                                      executable=self.path,
                                      stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE)
-        log_backend.debug('Backend started')
+        gobject.io_add_watch(self.proc.stdout,
+                             gobject.IO_IN | gobject.IO_PRI,
+                             self._reply_callback)
+        gobject.io_add_watch(self.proc.stdout,
+                             gobject.IO_ERR | gobject.IO_HUP,
+                             self._error_callback)
 
     def kill(self):
-        if not self.urpm:
-            log_backend.error("kill() called and backend's running.")
-            return
-        self.urpm.send_signal(signal.SIGTERM)
+        """ Send SIGTERM to the backend child asking and wait it to
+        exit.
+        """
+        if not self.running:
+            raise Exception, "kill() called and backend's not running"
+        self.proc.send_signal(signal.SIGTERM)
         # wait for child to terminate
-        self.urpm.communicate()
-        self.urpm = None
+        self.proc.communicate()
+        self.proc = None
         log_backend.debug('Backend killed')
 
-    def running(self):
-        if self.urpm != None:
-            return self.urpm.poll() == None
-        return False
-    
-    def do(self, cmd, *args, **kwargs):
-        """
-        Send a command to the backend and return a response generator.
-        """
+    def install_packages(self, task, names):
+        if self.task:
+            raise Exception, 'Already running a task'
+        self.task = task
+        self._send_task('install_packages', *names)
 
-        # Generating command for the backend ...
+    def task_has_done(self):
+        if not self.running:
+            raise BackendError, 'Backend has died.'
+        if self.error:
+            raise BackendError, self.error
+        return self.task == None
 
-        args_line = '\n'.join([ str(e) for e in args])
-        if args_line:
-            args_line += '\n'
+    def _send_task(self, task_name, *args):
+        if not self.running:
+            self.start()
+        self.proc.stdin.write("%s\t%s\n" % (task_name, '\t'.join(args)))
 
-        kwargs_line = '\n'.join([ '='.join([ str(e) for e in pair ])
-                                 for pair in kwargs.items() ])
-        if kwargs_line:
-            kwargs_line += '\n'
+    #
+    # Backend I/O callbacks
+    #
 
-        cmd_line = "%s\n%s%s\n" % (cmd, args_line, kwargs_line)
-        self.urpm.stdin.write(cmd_line)
+    def _reply_callback(self, stdout, condition):
+        # readline() may block, but we're expecting backend process to
+        # always emit data linewise, so if there is data a line will
+        # come shortly:            
+        line = stdout.readline()
+        if line.startswith('%MDVPKG\t') and self.task:
+            self._handle_backend_line(*line.rstrip('\n').split('\t', 2)[1:])
+        return True
 
-        # Response loop ...
+    def _error_callback(self, stdout, condition):
+        self.error = 'Pipe error with backend.'
+        self.kill()
 
-        while True:
-            resp = self.urpm.stdout.readline()
-
-            # Incomplete line, means the pipe was closed before a
-            # whole response was received from backend:
-            if not resp or not resp.endswith('\n'):
-                if self.running():
-                    self.kill()
-                    raise BackendDoError(
-                        "Backend's communication pipe closed, killing."
-                        )
-                else:
-                    raise BackendDoError('Backend died unexpectedly.')
-
-            (tag, data) = self._parse_response(resp)
-
-            # ERROR and END will stop the response generation ...
-
-            if tag == 'ERROR':
-                raise BackendDoError(data)                
-            elif tag == 'END':
-                break
-            elif tag == 'LOG':
-                log_backend.debug(data)
-            elif tag == 'RESULT':
-                yield eval(data)
-            else:
-                raise BackendDoError('Unknown response: %s' % resp)
-            
-    def _parse_response(self, l):
-        i = l.find(' ')
-        return l[:i], l[i+1:].strip()
-
-
-class TaskWorker(object):
-    """ A worker for tasks.  Tasks are queued in order of addition. """
-    
-    def __init__(self, backend_path):
-        self._queue = collections.OrderedDict()
-        self._backend = Backend(backend_path)
-        self._thread = threading.Thread(target=self._work_loop,
-                                        name='mdvpkg-worker-thread')
-        self._new_task = threading.Event()
-        self._queue_lock = threading.Lock()
-        self._thread.daemon = True
-        log.debug('Loading urpmi db')
-        self.urpmi = mdvpkg.repo.URPMI()
-        self.urpmi.load_db()
-        log.debug('urpmi db loaded')
-        self._thread.start()
-        self._task = None
-        self._last_action_timestamp = time.time()
-        self._backend.run()
-
-
-    def push(self, task):
-        """ Add a task to the task queue. """
-        with self._queue_lock:
-            self._queue[task.path] = task
-        self._new_task.set()
-
-    def inactive(self, idle_timeout):
-        return time.time() - self._last_action_timestamp > idle_timeout \
-                   and len(self._queue) == 0 \
-                   and not self._task
-
-    def stop(self):
-        """ Signal the worker process to do the last task and quit. """
-        self.__work = False
-        self._new_task.set()
-        self._thread.join()
-
-    def cancel(self, task):
-        if self._task == task:
-            # TODO Currently the task won't be cancelled, should we
-            #      put a flag in the for cancellation request?
-            return
+    def _handle_backend_line(self, tag, arg_str):
+        if tag.startswith('SIGNAL'):
+            signal = tag.split(' ')[1]
+            getattr(self.task, signal)(*eval(arg_str))
+        elif tag.startswith('EXCEPTION'):
+            self.error = eval(arg_str)
+        elif tag.startswith('DONE'):
+            self.task = None
         else:
-            # Not running the task, so we remove it from the queue.
-            # It's an error if the task was not queued ...
-            with self._queue_lock:
-                t = self._queue.pop(task.path, None)
-                if not t:
-                    log.error('Cancelling not queued task')
-                if t != task:
-                    log.error('Cancelling a task with different path')
+            self.error = 'Unknown response from backend: %s' % tag
 
-    def _work_loop(self):
-        """ Worker's thread activity method. """
-        log.info("Thread initialized")
-        self.__work = True
-        while self.__work:
-            try:
-                with self._queue_lock:
-                    (path, self._task) = self._queue.popitem(last=False)
-                    if len(self._queue) == 0:
-                        self._new_task.clear()                        
-            except KeyError:
-                if not self._new_task.wait(WAIT_TASK_TIMEOUT) \
-                       and self._backend.running():
-                    log.info('No tasks available, Killing backend')
-                    self._backend.kill()
-            else:
-                try:
-                    self._last_action_timestamp = time.time()
-                    log.debug('Got a task: %s', self._task.path)
-                    if not self._backend.running():
-                        self._backend.run()
-                    self._task.worker_callback(self.urpmi, self._backend)
-                    self._task.exit_callback()
-                    self._task = None
-                except Exception as e:
-                    log.exception("Raised in worker's thread")
 
-        if self._backend.running():
-            self._backend.kill()
-        log.info("Worker's thread killed")
+# class TaskQueue(object):
+#     """Queue for ordering mdvpkg task running."""
+#
+#     def __init__(self, urpmi, backend):
+#         self._urpmi = urpmi
+#         self._backend = backend
+#         self.queue = collections.OrderedDict()
+#
+#     def push(self, task):
+#         if not self.queue:
+#             gobject.idle_add(self.run_next)
+#         self.queue[task.path] = task
+#
+#     def run_next(self):
+#         try:
+#             path, task = self.queue.popitem(last=False)
+#         except KeyError:
+#             # This will happend if the last task has been cancelled
+#             # before run_next() was called ...
+#             pass
+#         else:
+#             self.task.run()

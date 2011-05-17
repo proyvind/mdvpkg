@@ -48,10 +48,16 @@ ERROR_TASK_EXCEPTION = 'error-task-exception'
 ## Task status
 # The task is being setup
 STATUS_SETTING_UP = 'status-setting-up'
-# Run() has just been called
-STATUS_RUNNING = 'status-running'
 # The task runner has finished
 STATUS_READY = 'status-ready'
+# The task is Searching packages
+STATUS_SEARCHING = 'status-searching'
+# Task is resolving dependencies of packages
+STATUS_SOLVING = 'status-resolving'
+# Task is downloading packages
+STATUS_DOWNLOADING = 'status-downloading'
+# Task is installing packages
+STATUS_INSTALLING = 'status-installing'
 
 log = logging.getLogger("mdvpkgd.task")
 
@@ -107,7 +113,6 @@ class TaskBase(dbus.service.Object):
         log.debug('Run called: %s, %s', sender, self.path)
         self._check_same_user(sender)
         self._check_if_has_run()
-        self.status = STATUS_RUNNING
         self._run()
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
@@ -158,6 +163,7 @@ class TaskBase(dbus.service.Object):
                 or self.status == STATUS_READY:
             self.Finished(EXIT_CANCELLED)
             self._remove_and_cleanup()
+        raise Exception, 'Task already running.'
 
     def _run(self):
         """ Controls the co-routine running the task. """
@@ -212,7 +218,8 @@ class TaskBase(dbus.service.Object):
             log.debug('Sender disconnected: %s, %s',
                       self._sender,
                       self.path)
-            self.cancel()
+            # FIXME Tasks running in the backend should be cancelled!
+            self._remove_and_cleanup()
 
     def _check_same_user(self, sender):
         """ Check if the sender is the task owner created the task. """
@@ -538,3 +545,66 @@ class SearchFilesTask(TaskBase):
             self.PackageFiles(r['name'], r['version'], r['release'],
                                   r['arch'], r['files'])
             yield
+
+class InstallPackagesTask(TaskBase):
+    """ Install packages or upgrades by name. """
+
+    def __init__(self, daemon, sender, names):
+        TaskBase.__init__(self, daemon, sender)
+        self.names = names
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='s')
+    def PreparingStart(self, total):
+        log.debug('PreparingStart emitted: %s' % (total))
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='ss')
+    def Preparing(self, amount, total):
+        log.debug('Preparing emitted: %s, %s' % (amount, total))
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='')
+    def PreparingDone(self):
+        log.debug('PreparingDone emitted')
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='s')
+    def DownloadStart(self, name):
+        log.debug('DownloadStart emitted: %s' % (name))
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='sssss')
+    def Download(self, name, percent, total, eta, speed):
+        log.debug('Download emitted: %s, %s, %s, %s, %s'
+                  % (name, percent, total, eta, speed))
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='s')
+    def DownloadDone(self, name):
+        log.debug('DownloadDone emitted: %s' % (name))
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='ss')
+    def DownloadError(self, name, message):
+        log.debug('DownloadError emitted: %s' % (name, message))
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='ss')
+    def InstallStart(self, name, total):
+        log.debug('InstallStart emitted: %s, %s' % (name, total))
+
+    @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
+                         signature='sss')
+    def Install(self, name, amount, total):
+        log.debug('Install emitted: %s, %s, %s' % (name, amount, total))
+
+    def run(self):
+        try:
+            self.backend.install_packages(self, self.names)
+            while not self.backend.task_has_done():
+                yield
+            # TODO Ask daemon to update it's cache ...  something like
+            #      daemon.update_cache()
+        except GeneratorExit:
+            self.backend.cancel(self)

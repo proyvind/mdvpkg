@@ -33,6 +33,13 @@ use urpm::args qw();
 use urpm::select qw();
 use urpm::main_loop qw();
 
+use constant {
+    STATUS_SOLVING => 'status-resolving',
+    STATUS_DOWNLOADING => 'status-downloading',
+    STATUS_INSTALLING => 'status-installing',
+    STATUS_SEARCHING => 'status-searching',
+};
+
 $| = 1;
 
 binmode STDOUT, ':encoding(utf8)';
@@ -117,8 +124,9 @@ sub on_task__install_packages {
 
     @names or die "Missing package names to install\n";
 
-    # 1. Search packages by name, getting their id ...
+    ## Search packages by name, getting their id ...
 
+    task_status_changed(STATUS_SEARCHING);
     my %packages;
     urpm::select::search_packages(
 	$urpm, 
@@ -126,7 +134,7 @@ sub on_task__install_packages {
 	\@names, 
     );
 
-    # 2. lock urpmi and rpm databases
+    ## Lock urpmi and rpm databases ...
 
     # Here we lock urpmi & rpm databases
     # In third argument we can specified if the script must wait until urpmi or rpm
@@ -134,14 +142,11 @@ sub on_task__install_packages {
     my $lock = urpm::lock::urpmi_db($urpm, undef, wait => 0);
     my $rpm_lock = urpm::lock::rpm_db($urpm, 'exclusive');
 
-    # 3. resolve dependencies, get $state object
+    ## Resolve dependencies, get $state object ...
 
-    # pk_print_status(PK_STATUS_ENUM_DEP_RESOLVE);
-    task_status_changed('status-resolving-dependencies');
-
+    task_status_changed(STATUS_SOLVING);
     my $state = {};
     my $restart;
-
     $restart = urpm::select::resolve_dependencies(
 	           $urpm,
 	           $state,
@@ -152,13 +157,7 @@ sub on_task__install_packages {
     # 4. Start urpm loop to download, remove and install packages ...
 
     my $exit_code;
-    my $callback_inst = sub {
-	use Data::Dumper;
-	print "vvv callback_inst vvv\n";
-	print Dumper @_;
-	print "^^^ calback_inst ^^^\n";
-    };
-
+    my $downloading = 0;
     $exit_code = urpm::main_loop::run(
 	$urpm,
 	$state,
@@ -175,10 +174,12 @@ sub on_task__install_packages {
 		my (undef, $file) = split(/: /, $urlfile);
 
 		if ($mode eq 'start') {
+		    $downloading or task_status_changed(STATUS_DOWNLOADING);
+		    $downloading ||= 1;
 		    task_signal('DownloadStart', str => $file);
 		}
 		elsif ($mode eq 'progress') {
-		    task_signal('DownloadProgress',
+		    task_signal('Download',
 				str => $file,
 				str => $percent,
 				str => $total,
@@ -186,7 +187,7 @@ sub on_task__install_packages {
 				str => $speed);
 		}
 		elsif ($mode eq 'end') {
-		    task_signal('DownloadEnd', str => $file);
+		    task_signal('DownloadDone', str => $file);
 		}
 		elsif ($mode eq 'error') {
 		    # Error message is 3rd argument, saved in $percent
@@ -211,13 +212,13 @@ sub on_task__install_packages {
 		my ($urpm, $type, $id, $subtype, $amount, $total) = @_;
 		my $pkg = $urpm->{depslist}[$id];
 		if ($subtype eq 'progress') {
-		    task_signal('PackageInstall',
+		    task_signal('Install',
 				str => scalar($pkg->fullname),
 				str => $amount,
 				str => $total);
 		}
 		elsif ($subtype eq 'start') {
-		    task_signal('PackageInstallStart',
+		    task_signal('InstallStart',
 				str => scalar($pkg->fullname),
 				str => $total);
 		}
@@ -225,7 +226,7 @@ sub on_task__install_packages {
 	    trans => sub {
 		my ($urpm, $type, $id, $subtype, $amount, $total) = @_;
 		if ($subtype eq 'progress') {
-		    task_signal('PreparingProgress',
+		    task_signal('Preparing',
 				str => $amount,
 				str => $total);
 		}
@@ -247,9 +248,11 @@ sub on_task__install_packages {
 	    completed => sub {
 		undef $lock;
 		undef $rpm_lock;
+		task_response('DONE');
 	    },
 	    post_download => sub {
-		print "Not implemented callback: post_download\n";
+		$downloading = 0;
+		task_status_changed(STATUS_INSTALLING);
 	    },
 	    message => sub {
 		my ($_title, $msg) = @_; # graphical title
