@@ -457,7 +457,7 @@ class ListPackagesTask(TaskBase):
         else:
             TaskBase._on_ready(self)
 
-    def _emit_package(self, pkg, rpm, media, index=None):
+    def _emit_package(self, pkg, rpm, media, index=0):
         # FIXME During normal Package signal emission, there is no
         #       need for index, this should be refactored to a cleaner
         #       form.
