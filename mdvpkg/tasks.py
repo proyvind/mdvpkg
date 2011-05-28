@@ -513,7 +513,7 @@ class ListPackagesTask(TaskBase):
         """
         match_func = self.filters[filter_name]['match_func']
         for (exclude, data) in self.filters[filter_name]['sets'].items():
-            if not (exclude ^ not match_func(candidate, data)):
+            if not (exclude ^ match_func(candidate, data)):
                 return True
         return False
 
