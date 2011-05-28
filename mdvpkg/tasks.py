@@ -465,6 +465,8 @@ class ListPackagesTask(TaskBase):
                      (rpm.name, rpm.version, rpm.release, rpm.arch),
                      rpm.summary,
                      pkg.status,
+                     media,
+                     pkg.group,
                      (bool(pkg.upgrades), bool(pkg.downgrades)))
 
     #
