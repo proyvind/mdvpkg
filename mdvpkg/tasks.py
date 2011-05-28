@@ -149,9 +149,9 @@ class TaskBase(dbus.service.Object):
                   status)
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='(ssss)a{sv}')
-    def PackageDetails(self, nvra, details):
-        log.debug('PackageDetails emitted: %s', nvra)
+                         signature='u(ssss)a{sv}')
+    def PackageDetails(self, index, nvra, details):
+        log.debug('PackageDetails emitted: %s %s', index, nvra)
 
     def run(self):
         """ Default runner, must be implemented in childs. """
@@ -251,7 +251,7 @@ class ListGroupsTask(TaskBase):
     """ List all available groups. """
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='st')
+                         signature='su')
     def Group(self, group, count):
         log.debug('Group emitted: %s', group)
 
@@ -278,12 +278,12 @@ class ListPackagesTask(TaskBase):
         self._pkg_cache = []
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='(ssss)ss(bb)')
-    def Package(self, nvra, description, status, updates):
-        log.debug('Package emitted: %s', nvra)
+                         signature='u(ssss)ssss(bb)')
+    def Package(self, index, nvra, summary, status, media, group, updates):
+        log.debug('Package emitted: %s %s', index, nvra)
 
     @dbus.service.signal(dbus_interface=mdvpkg.DBUS_TASK_INTERFACE,
-                         signature='t')
+                         signature='i')
     def Ready(self, total_of_matches):
         log.debug('Ready emitted: %s', total_of_matches)
 
@@ -358,29 +358,32 @@ class ListPackagesTask(TaskBase):
         self._append_or_create_filter('status', exclude, ['current'])
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
-                         in_signature='t',
+                         in_signature='u',
                          out_signature='',
                          sender_keyword='sender')
     def Get(self, index, sender):
-        log.debug('Get() called')
+        log.debug('Get() called: %s', index)
         self._check_same_user(sender)
         if self.status != STATUS_READY:
+            log.info("Get: Task status != STATUS_READY")
             raise mdvpkg.exceptions.TaskBadState
         (pkg, version) = self._pkg_cache[index]
-        self._emit_package(pkg, version['rpm'])
+        self._emit_package(pkg, version['rpm'], version['media'], index)
 
     @dbus.service.method(mdvpkg.DBUS_TASK_INTERFACE,
-                         in_signature='t',
+                         in_signature='u',
                          out_signature='',
                          sender_keyword='sender')
     def GetDetails(self, index, sender):
-        log.debug('Get() called')
+        log.debug('GetDetails() called: %s', index)
         self._check_same_user(sender)
         if self.status != STATUS_READY:
+            log.info("Get: Task status != STATUS_READY")
             raise mdvpkg.exceptions.TaskBadState
         (pkg, version) = self._pkg_cache[index]
         rpm = version['rpm']
         self.PackageDetails(
+            index,
             (rpm.name, rpm.version, rpm.release, rpm.arch),
             { 'status': pkg.status,
               'media': version['media'],
@@ -401,9 +404,13 @@ class ListPackagesTask(TaskBase):
         log.debug('Sort() called: %s', key)
         self._check_same_user(sender)
         if self.status != STATUS_READY:
+            log.info("Get: Task status != STATUS_READY")
             raise mdvpkg.exceptions.TaskBadState
-        if key in {'media', 'installtime'}:
+        if key in {'media'}:
             key_func = lambda pkg: pkg[1][key]
+        elif key in {'installtime'}:
+            # only installed versions have installtime:
+            key_func = lambda pkg: pkg[1].get(key, 0)
         elif key in {'status'}:
             key_func = lambda pkg: getattr(pkg[0], key)
         else:
@@ -441,7 +448,7 @@ class ListPackagesTask(TaskBase):
                 if self._cached:
                     self._pkg_cache.append((p, version))
                 else:
-                    self._emit_package(p, rpm)
+                    self._emit_package(p, rpm, media)
                 yield
 
     def _on_ready(self):
@@ -450,8 +457,12 @@ class ListPackagesTask(TaskBase):
         else:
             TaskBase._on_ready(self)
 
-    def _emit_package(self, pkg, rpm):
-        self.Package((rpm.name, rpm.version, rpm.release, rpm.arch),
+    def _emit_package(self, pkg, rpm, media, index=None):
+        # FIXME During normal Package signal emission, there is no
+        #       need for index, this should be refactored to a cleaner
+        #       form.
+        self.Package(index,
+                     (rpm.name, rpm.version, rpm.release, rpm.arch),
                      rpm.summary,
                      pkg.status,
                      (bool(pkg.upgrades), bool(pkg.downgrades)))
@@ -502,7 +513,7 @@ class ListPackagesTask(TaskBase):
         """
         match_func = self.filters[filter_name]['match_func']
         for (exclude, data) in self.filters[filter_name]['sets'].items():
-            if exclude ^ (not match_func(candidate, data)):
+            if not (exclude ^ not match_func(candidate, data)):
                 return True
         return False
 
