@@ -25,6 +25,7 @@
 
 from glob import glob
 from setuptools import setup
+from sys import platform
 
 import mdvpkg
 
@@ -43,7 +44,7 @@ setup(
         url='https://github.com/jvdm/mdvpkg',
         packages=['mdvpkg', 'mdvpkg.urpmi'],
         keywords="rpm urpmi mandriva cooker"
-        platforms = sys.platform,
+        platforms = platform,
         classifiers = [
             'Development Status :: 3 - Alpha',
             'Programming Language :: Python',
