@@ -1,5 +1,3 @@
-#!/usr/bin/python
-
 ##
 ## Copyright (C) 2010-2011 Mandriva S.A <http://www.mandriva.com>
 ## All rights reserved
@@ -18,13 +16,8 @@
 ## along with this program; if not, write to the Free Software
 ## Foundation, Inc., or visit: http://www.gnu.org/.
 ##
+##
 ## Author(s): J. Victor Martins <jvdm@mandriva.com>
+##            
 ##
-##
-
-
-import sys
-import mdvpkg.daemon
-
-if __name__ == '__main__':
-    mdvpkg.daemon.run()
+"""urpmi repository modules."""

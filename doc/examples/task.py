@@ -6,16 +6,19 @@ import mdvpkg
 import gobject
 from dbus.mainloop.glib import DBusGMainLoop
 
+DBusGMainLoop(set_as_default=True)
+bus = dbus.SystemBus()
+
 try:
+    if sys.argv[1].startswith('-'):
+	bus = dbus.SessionBus()
+	del sys.argv[1]
     task_name = sys.argv[1]
 except IndexError:
     print 'Missing task name.'
     sys.exit(1)
 
-DBusGMainLoop(set_as_default=True)
 loop = gobject.MainLoop()
-
-bus = dbus.SystemBus()
 
 def signal_cb(*args, **kwargs):
     signal = kwargs['signal']

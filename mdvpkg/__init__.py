@@ -19,10 +19,10 @@
 ##
 ## Author(s): J. Victor Martins <jvdm@mandriva.com>
 ##
+"""Mandriva package daemon."""
 
 __author__  = "J. Victor Martins <jvdm@mandriva.com>"
-__state__   = "development"
-__version__ = "0.5.3"
+__version__ = "0.6.3"
 
 DBUS_SERVICE = 'org.mandrivalinux.mdvpkg'
 DBUS_INTERFACE = 'org.mandrivalinux.mdvpkg'
@@ -31,6 +31,7 @@ DBUS_PATH = '/'
 DBUS_TASK_PATH = '%stask' % DBUS_PATH
 DBUS_TASK_INTERFACE = '%s.task' % DBUS_INTERFACE
 
+## Those are used in setup.py to configure installation paths ...
 MANDRIVA_DATA_DIR = '/usr/share/mandriva'
 DEFAULT_DATA_DIR = '%s/mdvpkg' % MANDRIVA_DATA_DIR
 DEFAULT_BACKEND_DIR = '%s/backend' % DEFAULT_DATA_DIR

@@ -19,14 +19,14 @@
 ##
 ## Author(s): J. Victor Martins <jvdm@mandriva.com>
 ##
-""" Mandriva Package exceptions and errors. """
+"""Mdvpkg exceptions and errors."""
 
 
 import dbus
 
 
 class MdvPkgError(dbus.DBusException):
-    """ Base error class for mdvpkg. """
+    """Base error class for mdvpkg."""
 
     def __init__(self):
         name = self.__class__.__name__
@@ -34,15 +34,12 @@ class MdvPkgError(dbus.DBusException):
 
 
 class TaskAlreadyRunning(MdvPkgError):
-    """ Raised if a class is tried to be runned twice. """
+    """Raised if a class is tried to be runned twice."""
 
 
 class NotOwner(MdvPkgError):
-    """ Raised if a different sender tries to execute task 
-    methods.
-    """
-
+    """Raised if a different sender tries to execute task methods."""
 
 class TaskBadState(MdvPkgError):
-    """ Raised if an attempt to call methods on a task is made and its
+    """Raised if an attempt to call methods on a task is made and its
     state is invalid."""

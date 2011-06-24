@@ -1,0 +1,19 @@
+=================
+mdvpkg TODO List
+=================
+
+* Decide if cached methods should emit signals or return data.
+
+* Add support for better cache updates, implementing verification of
+  changes in entries by package versions.
+
+* Fix documentation to adhere to sphynx
+
+* Automate synchronization of status variables between backend and
+  tasks.py
+
+* Decide how to report back to clients the number of packages in list
+  by status -- try no to use Ready signal since it can be used by
+  different cached results, and not just packages.
+
+* Put versions list in version order (probably using OrderedDict()).

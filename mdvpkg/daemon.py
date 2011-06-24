@@ -19,7 +19,7 @@
 ##
 ## Author(s): J. Victor Martins <jvdm@mandriva.com>
 ##
-""" Main daemon class. """
+"""Main daemon class and running script."""
 
 
 import logging
@@ -33,50 +33,19 @@ import gobject
 import signal 
 
 import mdvpkg
-import mdvpkg.exceptions
-import mdvpkg.repo
+import mdvpkg.urpmi.db
 import mdvpkg.tasks
-from mdvpkg.worker import Backend
+import mdvpkg.worker
 
 
+log = logging.getLogger('mdvpkgd')
 # setup default dbus mainloop:
 dbus.mainloop.glib.DBusGMainLoop(set_as_default=True)
 
-# setup logging ...
-log = logging.getLogger("mdvpkgd")
-try:
-    _syslog = logging.handlers.SysLogHandler(
-                  address="/dev/log",
-                  facility=logging.handlers.SysLogHandler.LOG_DAEMON
-              )
-    _syslog.setLevel(logging.INFO)
-    _formatter = logging.Formatter("%(name)s: %(levelname)s: "
-                                       "%(message)s")
-    _syslog.setFormatter(_formatter)
-except:
-    pass
-else:
-    log.addHandler(_syslog)
 
-_console = logging.StreamHandler()
-_formatter = logging.Formatter("%(asctime)s %(name)s [%(levelname)s]: "
-                                   "%(message)s",
-                               "%T")
-_console.setFormatter(_formatter)
-log.addHandler(_console)
-
-IDLE_CHECK_INTERVAL = 1000
-IDLE_TIMEOUT = 5 * 60
-
-
-class MDVPKGDaemon(dbus.service.Object):
-    """
-    Represents the daemon, which provides the dbus interface (by
-    default at the system bus).
-
-    The daemon is responsible of managing transactions which is the
-    base of package managing operations.
-    """
+class MdvPkgDaemon(dbus.service.Object):
+    """Represents the daemon, which provides the dbus interface (by
+    default at the system bus)."""
 
     def __init__(self, bus=None, backend_path=None):
         log.info('Starting daemon')
@@ -99,15 +68,9 @@ class MDVPKGDaemon(dbus.service.Object):
                          mdvpkg.DBUS_SERVICE)
             sys.exit(1)
         dbus.service.Object.__init__(self, bus_name, mdvpkg.DBUS_PATH)
-        # TODO Signal progress of urpmi and backend initialization
-        self.urpmi =  mdvpkg.repo.URPMI()
-        log.info('Loading urpmi database')
-        self.urpmi.load_db()
-        log.info('Loading urpmi backend')
-        self.backend = Backend(backend_path)
+        self.urpmi = mdvpkg.urpmi.db.UrpmiDB()
+        self.runner = mdvpkg.worker.Runner(self.urpmi, backend_path)
         log.info('Daemon is ready')
-        ## FIXME Temporarly removed the inactivity check
-        # gobject.timeout_add(IDLE_CHECK_INTERVAL, self._check_for_inactivity)
 
     def run(self):
         try:
@@ -134,34 +97,24 @@ class MDVPKGDaemon(dbus.service.Object):
                                  sender)
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
-                         in_signature='',
-                         out_signature='o',
-                         sender_keyword='sender')
-    def ListPackages(self, sender):
-        log.info('ListPackages() called')
-        return self._create_task(mdvpkg.tasks.ListPackagesTask,
-                                 sender)
-
-    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
-                         in_signature='ssss',
-                         out_signature='o',
-                         sender_keyword='sender')
-    def PackageDetails(self, name, version, release, arch, sender):
-        log.info('PackageDetails() called: %s', name)
-        return self._create_task(mdvpkg.tasks.PackageDetailsTask,
-                                 sender,
-                                 ( str(name), str(version), 
-                                       str(release), str(arch) ))
-
-    @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='as',
                          out_signature='o',
                          sender_keyword='sender')
-    def SearchFiles(self, files, sender):
-        log.info('SearchFiles() called: %s', files)
-        return self._create_task(mdvpkg.tasks.SearchFilesTask,
+    def ListPackages(self, attributes, sender):
+        log.info('ListPackages() called')
+        return self._create_task(mdvpkg.tasks.ListPackagesTask,
                                  sender,
-                                 files)
+                                 attributes)
+
+    # @dbus.service.method(mdvpkg.DBUS_INTERFACE,
+    #                      in_signature='as',
+    #                      out_signature='o',
+    #                      sender_keyword='sender')
+    # def SearchFiles(self, files, sender):
+    #     log.info('SearchFiles() called: %s', files)
+    #     return self._create_task(mdvpkg.tasks.SearchFilesTask,
+    #                              sender,
+    #                              files)
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
                          in_signature='as',
@@ -174,36 +127,81 @@ class MDVPKGDaemon(dbus.service.Object):
                                  names)
 
     @dbus.service.method(mdvpkg.DBUS_INTERFACE,
-                         in_signature="",
-                         out_signature="",
-                         sender_keyword="sender")
+                         in_signature='',
+                         out_signature='',
+                         sender_keyword='sender')
     def Quit(self, sender):
-        """ Request a shutdown of the service. """
-        log.info("Shutdown was requested")
-        log.debug("Quitting main loop...")
+        """Request a shutdown of the service."""
+        log.info('Shutdown was requested')
+        log.debug('Quitting main loop...')
         self._loop.quit()
 
     def _create_task(self, task_class, sender, *args):
-        log.debug('_create_task(): %s, %s, args=%s',
-                  task_class.__name__,
-                  sender,
-                  args)
-        task = task_class(self, sender, *args)
+        task = task_class(self, sender, self.runner, *args)
         return task.path
 
     def _quit_handler(self, signum, frame):
-        """ Handler for quiting signals. """
+        """Handler for quiting signals."""
         self.Quit(None)
 
-    # def _check_for_inactivity(self):
-    #     """
-    #     Shutdown the daemon if it has been inactive for time specified
-    #     in IDLE_TIMEOUT.
-    #     """
-    #     log.debug("Checking for inactivity")
-    #     if self._worker.inactive(IDLE_TIMEOUT) \
-    #            and not gobject.main_context_default().pending():
-    #         log.info("Quiting due to inactivity")
-    #         self.Quit(None)
-    #         return False
-    #     return True
+
+def run():
+    """Run the mdvpkg daemon from command line."""
+    ## Setup logging ...
+    try:
+        _syslog = logging.handlers.SysLogHandler(
+                      address='/dev/log',
+                      facility=logging.handlers.SysLogHandler.LOG_DAEMON
+                  )
+        _syslog.setLevel(logging.INFO)
+        _formatter = logging.Formatter('%(name)s: %(levelname)s: '
+                                           '%(message)s')
+        _syslog.setFormatter(_formatter)
+    except:
+        pass
+    else:
+        log.addHandler(_syslog)
+    _console = logging.StreamHandler()
+    _formatter = logging.Formatter('%(asctime)s %(name)s [%(levelname)s]: '
+                                       '%(message)s',
+                                   '%T')
+    _console.setFormatter(_formatter)
+    log.addHandler(_console)
+
+    ## Parse command line options ...
+    from optparse import OptionParser
+    parser = OptionParser()
+    parser.add_option('-s', '--session',
+                      default=False,
+                      action='store_true',
+                      dest='session',
+                      help="Connect mdvpkgd's DBus service to the session "
+                           "bus (instead of the system bus).")
+    parser.add_option('-d', '--debug',
+                      default=False,
+                      action='store_true',
+                      dest='debug',
+                      help='Show debug messages and information.')
+    parser.add_option('-b', '--backend',
+                      default=False,
+                      action='store',
+                      dest='backend',
+                      help='Path to the urpmi backend to use.')
+    opts, args = parser.parse_args()
+
+    ## Setup daemon and run ...
+    bus = None
+    if opts.session:
+        import dbus
+        bus = dbus.SessionBus()
+    if opts.debug:
+        log.setLevel(logging.DEBUG)
+    else:
+        log.setLevel(logging.INFO)
+
+    d = MdvPkgDaemon(bus=bus, backend_path=opts.backend)
+    d.run()
+
+
+if __name__ == '__main__':
+    run()
