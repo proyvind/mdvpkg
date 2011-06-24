@@ -24,7 +24,7 @@
 """Distutil setup call for mdvpkg."""
 
 from glob import glob
-from distutils.core import setup
+from setuptools import setup
 
 import mdvpkg
 
@@ -42,15 +42,16 @@ setup(
     license='GPLv2+',
     url='https://github.com/jvdm/mdvpkg',
     packages=['mdvpkg', 'mdvpkg.urpmi'],
-    scripts=['bin/mdvpkgd'],
     data_files=[
         ('/etc/dbus-1/system.d/', glob('dbus/*.conf')),
         ('/usr/share/dbus-1/system-services/', glob('dbus/*.service')),
-        (mdvpkg.DEFAULT_BACKEND_DIR, ['backend/urpmi_backend.pl']),
     ],
+    entry_points = {'console_scripts': ['mdvpkgd=mdvpkg.daemon:run']},
+    include_package_data = True,
+    package_data = {
+	'backend' : ['mdvpkg/backend'],
+	},
     options={
-        'install': { 'install_purelib': mdvpkg.DEFAULT_DATA_DIR,
-                     'install_scripts': '/usr/sbin',
-                     'install_data': mdvpkg.DEFAULT_DATA_DIR }
+        'install': { 'install_scripts': '/usr/sbin'}
     },
 )

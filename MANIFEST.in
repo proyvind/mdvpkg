@@ -1,5 +1,10 @@
 # distutils MANIFEST template, see:
 # http://docs.python.org/distutils/sourcedist.html#the-manifest-in-template
 
-include TODO
-graft doc/
+include \
+TODO \
+dbus/org.mandrivalinux.mdvpkg.conf \
+dbus/org.mandrivalinux.mdvpkg.service \
+mdvpkg/backend/urpmi_backend.pl \
+doc/examples/list_media.py \
+doc/examples/task.py
