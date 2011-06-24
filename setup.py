@@ -33,25 +33,37 @@ with open('README') as file:
     long_description = file.read()
 
 setup(
-    name='mdvpkg',
-    version=mdvpkg.__version__,
-    description="Mandriva's package management daemon",
-    long_description=long_description,
-    author='J. Victor Martins',
-    author_email='jvdm@mandriva.com',
-    license='GPLv2+',
-    url='https://github.com/jvdm/mdvpkg',
-    packages=['mdvpkg', 'mdvpkg.urpmi'],
-    data_files=[
-        ('/etc/dbus-1/system.d/', glob('dbus/*.conf')),
-        ('/usr/share/dbus-1/system-services/', glob('dbus/*.service')),
-    ],
-    entry_points = {'console_scripts': ['mdvpkgd=mdvpkg.daemon:run']},
-    include_package_data = True,
-    package_data = {
-	'backend' : ['mdvpkg/backend'],
-	},
-    options={
-        'install': { 'install_scripts': '/usr/sbin'}
-    },
-)
+        name='mdvpkg',
+        version=mdvpkg.__version__,
+        description="Mandriva's package management daemon",
+        long_description=long_description,
+        author='J. Victor Martins',
+        author_email='jvdm@mandriva.com',
+        license='GPLv2+',
+        url='https://github.com/jvdm/mdvpkg',
+        packages=['mdvpkg', 'mdvpkg.urpmi'],
+        keywords="rpm urpmi mandriva cooker"
+        platforms = sys.platform,
+        classifiers = [
+            'Development Status :: 3 - Alpha',
+            'Programming Language :: Python',
+            'Topic :: Software Development :: Libraries :: Python Modules',
+            'Intended Audience :: Developers',
+            'License :: OSI Approved :: General Public License',
+            'Operating System :: POSIX :: Linux'
+            ],
+        data_files=[
+            ('/etc/dbus-1/system.d/', glob('dbus/*.conf')),
+            ('/usr/share/dbus-1/system-services/', glob('dbus/*.service')),
+            ],
+        entry_points = {'console_scripts': ['mdvpkgd=mdvpkg.daemon:run']},
+        include_package_data = True,
+        package_data = {
+            'backend' : ['mdvpkg/backend'],
+            },
+        options={
+            'install': { 'install_scripts': '/usr/sbin'}
+            },
+        )
+
+# vim:ts=4:sw=4:et
